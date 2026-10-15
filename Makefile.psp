@@ -1,0 +1,74 @@
+# ==============================================================================
+# Makefile.psp - Production PSP Build Makefile for Parasite Eve Decompilation Port
+# Target: Sony PlayStation Portable (MIPS Allegrex / PRX executable format)
+# ==============================================================================
+
+ifeq ($(PSPDEV),)
+    PSPDEV := $(shell pwd)/.pspsdk
+endif
+
+ifeq ($(PSPSDK),)
+    PSPSDK := $(PSPDEV)/psp/sdk
+endif
+
+# Check toolchain availability
+ifeq ($(wildcard $(PSPDEV)/bin/psp-gcc),)
+    $(error PSPDEV toolchain not detected at $(PSPDEV). Run ./bootstrap_local_pspsdk.sh first)
+endif
+
+TARGET   = parasite_eve
+OBJS     = $(patsubst %.c,%.o,$(wildcard src/*.c))
+
+# If src/ has no c files yet during initial setup, use placeholder main.o
+ifeq ($(strip $(OBJS)),)
+    OBJS = main.o
+endif
+
+# Include directories: Search isolated target directories and PSPSDK
+INCDIR   = $(PSPDEV)/psp/include $(PSPDEV)/psp/include/SDL $(PSPSDK)/include include .
+
+# Target Flags:
+# -O2: Optimization level
+# -G0: Put all small data into regular data sections (required for MIPS Allegrex PRX)
+# -D_PSP_FW_VERSION=600: Target Firmware 6.00+
+CFLAGS   = -O2 -G0 -Wall -Wextra -Wno-unused-parameter -Wno-unused-variable \
+           -D_PSP_FW_VERSION=600 -DENABLE_PSP
+CXXFLAGS = $(CFLAGS) -fno-exceptions -fno-rtti
+ASFLAGS  = $(CFLAGS)
+
+# Library paths and explicit linking order
+LIBDIR   = $(PSPDEV)/psp/lib $(PSPSDK)/lib
+
+# Core port libraries:
+# -lSDL_mixer : Software mixing for SPU ADPCM / CD-DA audio streams
+# -lSDL       : SDL 1.2 handling sceAudio, sceCtrl (Input), Threads, Timers (dummy video)
+# -lpspgum    : PSP GU Matrix and math utility library
+# -lpspgu     : Direct PSP Graphic Engine / Hardware Rasterizer (exclusive VRAM ownership)
+# -lpspge     : PSP Graphics Engine hardware driver
+# -lpspdisplay: Display control and VBLANK synchronization
+# -lpspctrl   : PSP Pad / Joystick controller input
+# -lpspaudio  : Low-level hardware audio channel output
+# -lpsppower  : Battery and CPU clock management (up to 333MHz)
+# -lpsprtc    : High-resolution hardware real-time clock / timers
+# -lm -lc     : Standard C and Math libraries
+LIBS     = -lSDL_mixer -lSDL -lpspgum -lpspgu -lpspge -lpspdisplay \
+           -lpspctrl -lpspaudio -lpsppower -lpsprtc -lm -lc
+
+# Target Configuration:
+# BUILD_PRX=1 is mandatory for large memory layout and clean module dynamic relocations
+BUILD_PRX          = 1
+PSP_LARGE_MEMORY   = 1
+PSP_FW_VERSION     = 600
+
+# Metadata for generated EBOOT.PBP
+EXTRA_TARGETS      = EBOOT.PBP
+PSP_EBOOT_TITLE    = Parasite Eve (PSP Port)
+PSP_EBOOT_ICON     = NULL
+PSP_EBOOT_ICON1    = NULL
+PSP_EBOOT_UNKPNG   = NULL
+PSP_EBOOT_PIC1     = NULL
+PSP_EBOOT_SND0     = NULL
+PSP_EBOOT_PSAR     = NULL
+
+# Include PSPSDK build rules
+include $(PSPSDK)/lib/build.mak

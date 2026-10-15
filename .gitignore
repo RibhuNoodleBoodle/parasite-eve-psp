@@ -192,3 +192,13 @@ docs/RETROSPECTIVE_METRICS.md
 tools/gas-2.7/
 tools/gas-2.8.1/
 tools/binutils-2.45/
+
+# Hermetic PSP Toolchain, SDK, archives, and compiled binary targets
+.pspsdk/
+pspdev*.tar.gz
+*.prx
+*.pbp
+*.sfo
+EBOOT.PBP
+PARAM.SFO
+SAVEDATA/
