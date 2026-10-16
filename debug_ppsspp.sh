@@ -123,8 +123,8 @@ fi
 rm -f "$ROOT_DIR/dist/PSP/GAME/ParasiteEve/frame_dump_enable.flag" "$MEMSTICK_GAME_DIR/frame_dump_enable.flag" 2>/dev/null || true
 rm -f "$ROOT_DIR/dist/PSP/GAME/ParasiteEve/autotest.flag" "$MEMSTICK_GAME_DIR/autotest.flag" 2>/dev/null || true
 
-# Sync frame_dump.ppm and frame_dump_logo.ppm into .ppsspp/, dist/, and project root if written via ms0:/ or host0:/
-for ppm_name in "frame_dump.ppm" "frame_dump_logo.ppm"; do
+# Sync frame_dump.ppm, frame_dump_logo.ppm, frame_dump_carnegie.ppm, and frame_dump_str.ppm into .ppsspp/, dist/, and project root
+for ppm_name in "frame_dump.ppm" "frame_dump_logo.ppm" "frame_dump_carnegie.ppm" "frame_dump_str.ppm"; do
     for candidate_ppm in \
         "$PPSSPP_DIR/.config/ppsspp/$ppm_name" \
         "$PPSSPP_DIR/.config/ppsspp/PSP/GAME/ParasiteEve/$ppm_name" \

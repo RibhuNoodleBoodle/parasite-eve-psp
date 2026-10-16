@@ -1441,7 +1441,7 @@ int DrawSync(int mode) {
     return 0;
 }
 
-static void psp_write_ppm_screenshot(const char *path, const uint16_t *fb) {
+void psp_write_ppm_screenshot(const char *path, const uint16_t *fb) {
     static uint8_t s_ppm_row[PSP_SCREEN_WIDTH * 3];
     SceUID fd = sceIoOpen(path, PSP_O_WRONLY | PSP_O_CREAT | PSP_O_TRUNC, 0666);
     if (fd < 0) return;
@@ -1485,7 +1485,9 @@ int VSync(int mode) {
     g_psp_gpu.draw_buffer = sceGuSwapBuffers();
     g_psp_gpu.frame_counter++;
 
-    if (g_psp_gpu.frame_counter % 60 == 0) {
+    extern int g_SceneDispatchToken;
+    int is_carnegie = ((uint32_t)g_SceneDispatchToken == 0xA8000148u);
+    if ((g_psp_gpu.frame_counter % 60 == 0) || is_carnegie) {
         uint32_t vram_nonzero = 0;
         for (int p = 0; p < PS1_VRAM_PIXELS; p++) {
             if (g_ps1_vram[p] != 0) vram_nonzero++;
@@ -1563,12 +1565,12 @@ int VSync(int mode) {
                 psp_write_ppm_screenshot("ms0:/frame_dump_logo.ppm", edram_disp);
                 psp_write_ppm_screenshot("frame_dump_logo.ppm", edram_disp);
             }
-            if (g_psp_gpu.current_dispenv.isrgb24 && disp_nonblack > 0) {
-                static int s_dumped_str = 0;
-                if (!s_dumped_str) {
-                    s_dumped_str = 1;
-                    psp_write_ppm_screenshot("ms0:/frame_dump_str.ppm", edram_disp);
-                    psp_write_ppm_screenshot("frame_dump_str.ppm", edram_disp);
+            if (is_carnegie && disp_nonblack > 0) {
+                static int s_dumped_carnegie = 0;
+                if (!s_dumped_carnegie) {
+                    s_dumped_carnegie = 1;
+                    psp_write_ppm_screenshot("ms0:/frame_dump_carnegie.ppm", edram_disp);
+                    psp_write_ppm_screenshot("frame_dump_carnegie.ppm", edram_disp);
                 }
             }
             psp_write_ppm_screenshot("ms0:/frame_dump.ppm", edram_disp);
