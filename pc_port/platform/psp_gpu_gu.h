@@ -13,12 +13,14 @@
 #ifndef PSP_GPU_GU_H
 #define PSP_GPU_GU_H
 
+#include "common.h"
 #include <stdint.h>
 #include <stddef.h>
 #include <psptypes.h>
 #include <pspgu.h>
 #include <pspgum.h>
 #include <pspdisplay.h>
+#include "pe1/psyq_types.h"
 
 #ifdef __cplusplus
 extern "C" {
@@ -77,11 +79,16 @@ typedef struct RECT {
 } RECT;
 #endif
 
+#ifndef DR_ENV_DEFINED
+#define DR_ENV_DEFINED
 typedef struct DR_ENV {
     uint32_t tag;
     uint32_t code[15];
 } DR_ENV;
+#endif
 
+#ifndef DRAWENV_DEFINED
+#define DRAWENV_DEFINED
 typedef struct DRAWENV {
     RECT clip;             /* Clip area */
     int16_t ofs[2];        /* Drawing offset */
@@ -93,7 +100,10 @@ typedef struct DRAWENV {
     uint8_t r0, g0, b0;    /* Background clear color */
     DR_ENV dr_env;         /* Reserved GPU packet environment */
 } DRAWENV;
+#endif
 
+#ifndef DISPENV_DEFINED
+#define DISPENV_DEFINED
 typedef struct DISPENV {
     RECT disp;             /* Display area in VRAM */
     RECT screen;           /* Screen offset / geometry */
@@ -102,6 +112,7 @@ typedef struct DISPENV {
     uint8_t pad0;
     uint8_t pad1;
 } DISPENV;
+#endif
 
 /* ------------------------------------------------------------------------------
  * PSP Screen Scaling & Aspect Ratio Modes
@@ -144,6 +155,7 @@ typedef struct PspVertexTex2D {
 typedef struct PspGpuState {
     int initialized;
     int in_frame;
+    int frame_drawn;
     uint32_t frame_counter;
 
     /* Display buffer pointers in PSP EDRAM */
@@ -234,16 +246,16 @@ void PspGpu_InvalidateVramRange(uint32_t x, uint32_t y, uint32_t w, uint32_t h);
 /* PS1 Psy-Q Standard API Declarations */
 int  DrawSync(int mode);
 int  VSync(int mode);
-int  ResetGraph(int mode);
-int  SetDispMask(int mask);
-int  LoadImage(const RECT *rect, const void *pixels);
-int  StoreImage(const RECT *rect, void *pixels);
-int  MoveImage(const RECT *src, int dst_x, int dst_y);
-void ClearImage(const RECT *rect, uint8_t r, uint8_t g, uint8_t b);
-DRAWENV *PutDrawEnv(const DRAWENV *env);
-DISPENV *PutDispEnv(const DISPENV *env);
-void DrawOTag(const uint32_t *ot);
-void DrawPrim(const void *p);
+void ResetGraph(int mode);
+void SetDispMask(int mask);
+int  LoadImage(RECT *rect, void *pixels);
+int  StoreImage(RECT *rect, void *pixels);
+void MoveImage(RECT *src, int dst_x, int dst_y);
+void ClearImage(RECT *rect, int r, int g, int b);
+DRAWENV *PutDrawEnv(DRAWENV *env);
+DISPENV *PutDispEnv(DISPENV *env);
+int  DrawOTag(u_int *ot);
+int  DrawPrim(void *p);
 
 #ifdef __cplusplus
 }

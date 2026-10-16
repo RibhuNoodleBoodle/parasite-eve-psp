@@ -1,6 +1,7 @@
 #ifndef PSP_CDROM_ISO_H
 #define PSP_CDROM_ISO_H
 
+#include "common.h"
 #include <stdint.h>
 #include <stddef.h>
 #include <stdbool.h>
@@ -97,20 +98,40 @@ int  PspCdrom_SeekLba(uint32_t lba);
 int  PspCdrom_ReadRawSector(uint32_t lba, uint8_t *out_raw);
 int  PspCdrom_ReadUserSector(uint32_t lba, uint8_t *out_user);
 int  PspCdrom_ReadUserData(uint32_t lba, uint32_t offset, void *out, uint32_t len);
+int  PspCdrom_ReadDiscSectors(uint32_t lba, uint32_t offset, void *destination, uint32_t size);
 uint32_t PspCdrom_GetSectorCount(void);
 
+#ifndef CDLLOC_DEFINED
+#define CDLLOC_DEFINED
+typedef struct CdlLOC {
+    uint8_t minute;
+    uint8_t second;
+    uint8_t sector;
+    uint8_t track;
+} CdlLOC;
+#endif
+
+#ifndef DSLFILE_DEFINED
+#define DSLFILE_DEFINED
+typedef struct DslFILE {
+    CdlLOC pos;
+    uint32_t size;
+    char name[16];
+} DslFILE;
+#endif
+
 /* Psy-Q Cdl Compatibility Functions */
-int  CdControl(unsigned char com, const unsigned char *param, unsigned char *result);
-int  CdControlF(unsigned char com, const unsigned char *param);
-int  CdControlB(unsigned char com, const unsigned char *param, unsigned char *result);
+int  CdControl(unsigned char com, unsigned char *param, unsigned char *result);
+int  CdControlF(unsigned char com, unsigned char *param);
+int  CdControlB(unsigned char com, unsigned char *param, unsigned char *result);
 int  CdRead(int sectors, unsigned long *buf, int mode);
 int  CdSync(int mode, unsigned char *result);
 int  CdReadSync(int mode, unsigned char *result);
 int  CdReady(int mode, unsigned char *result);
 int  CdSeekL(const unsigned char *msf);
 int  CdGetSector(void *madr, int size);
-int  CdPosToInt(const unsigned char *msf);
-void CdIntToPos(int i, unsigned char *msf);
+int  CdPosToInt(CdlLOC *msf);
+CdlLOC *CdIntToPos(int i, CdlLOC *msf);
 
 /*
  * PS1 MDEC & STR Movie Streaming (Lightweight Macroblock IDCT)
@@ -142,39 +163,20 @@ int  PspStr_DecodeFrame(const uint8_t *str_chunk_stream, size_t total_bytes,
 int  PspStr_StreamVideo(uint32_t start_lba, uint32_t sector_count,
                         void *dst_texture, int tex_width, int tex_height, int is_16bit);
 
-#ifndef CDLLOC_DEFINED
-#define CDLLOC_DEFINED
-typedef struct CdlLOC {
-    uint8_t minute;
-    uint8_t second;
-    uint8_t sector;
-    uint8_t track;
-} CdlLOC;
-#endif
-
-#ifndef DSLFILE_DEFINED
-#define DSLFILE_DEFINED
-typedef struct DslFILE {
-    CdlLOC pos;
-    uint32_t size;
-    char name[16];
-} DslFILE;
-#endif
-
 /* PS1 Psy-Q libds & cdrom prototypes */
 int DsSystemStatus(void);
 int DsShellOpen(void);
 int DsQueueLen(void);
 int DsGetDiskType(void);
 int DsPosToInt(CdlLOC *position);
-CdlLOC *DsIntToPos(int i, CdlLOC *p);
-DslFILE *DsSearchFile(DslFILE *file, const char *name);
-int CdRom_ReadSectors(uint32_t lba, uint32_t offset, void *destination, uint32_t size);
-int CdRom_ReadSectorsFromLba(uint32_t lba, void *destination, uint32_t size);
+CdlLOC *DsIntToPos(int sector, CdlLOC *position);
+DslFILE *DsSearchFile(DslFILE *file, char *name);
+int CdRom_ReadSectors(u32 lba, u32 offset, void *destination, u32 size);
+int CdRom_ReadSectorsFromLba(u32 lba, void *destination, u32 size);
 int CdRom_PollReady(void);
 int DsReadSync(void *argument);
 int DsReady(uint8_t *destination);
-int DsRead(CdlLOC *position, int sectors, void *destination, int mode);
+int DsRead(struct CdlLOC *position, int sectors, void *destination, int mode);
 int DsControl(unsigned char command, void *param, void *result);
 int DsControlB(unsigned char command, void *param, void *result);
 void DS_restart(void);
@@ -183,8 +185,8 @@ int DsReset(void);
 int ER_retry(void);
 int DS_lastcom(void);
 int DS_lastmode(void);
-CdlLOC *DS_lastpos(void);
-CdlLOC *DsLastPos(CdlLOC *destination);
+struct CdlLOC *DS_lastpos(void);
+struct CdlLOC *DsLastPos(struct CdlLOC *destination);
 
 #ifdef __cplusplus
 }

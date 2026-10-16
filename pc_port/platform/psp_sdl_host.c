@@ -521,6 +521,13 @@ void FlushCache(void)
     sceKernelIcacheInvalidateAll();
 }
 
+void ResetCallback(void) {}
+void SpuInit(void) {}
+void SsInit(void) {}
+void Spu_InitHardware(void) {}
+void Spu_Shutdown(void) {}
+
+
 #ifdef main
 #undef main
 #endif

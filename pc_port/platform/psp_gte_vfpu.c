@@ -270,3 +270,20 @@ void PspGte_Square0(const PspGteVector *v0, PspGteVector *v1)
     v1->vz = (int32_t)(((int64_t)v0->vz * v0->vz) >> 12);
     v1->_pad = 0;
 }
+
+void InitGeom(void) {
+    PspGte_Init();
+}
+
+void SetGeomOffset(int x, int y) {
+    PspGte_SetGeomOffset(x, y);
+}
+
+void SetGeomScreen(int h) {
+    PspGte_SetGeomScreen(h);
+}
+
+int RotTransPers(const GteShortVector *v, int *sxy, int *p, int *flag) {
+    return (int)PspGte_RotTransPers((const PspGteSVector *)v, (int32_t *)sxy, (int32_t *)p, (int32_t *)flag);
+}
+

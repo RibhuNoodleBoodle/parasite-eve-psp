@@ -659,27 +659,32 @@ uint32_t PspCdrom_GetSectorCount(void)
 
 /* ── Psy-Q Cdl Compatibility Functions ──────────────────────────────────────── */
 
-int CdPosToInt(const unsigned char *msf)
+int CdPosToInt(CdlLOC *msf)
 {
-    int m = (msf[0] >> 4) * 10 + (msf[0] & 0x0F);
-    int s = (msf[1] >> 4) * 10 + (msf[1] & 0x0F);
-    int f = (msf[2] >> 4) * 10 + (msf[2] & 0x0F);
+    if (!msf) return 0;
+    const unsigned char *b = (const unsigned char *)msf;
+    int m = (b[0] >> 4) * 10 + (b[0] & 0x0F);
+    int s = (b[1] >> 4) * 10 + (b[1] & 0x0F);
+    int f = (b[2] >> 4) * 10 + (b[2] & 0x0F);
     return (m * 60 + s) * 75 + f - 150;
 }
 
-void CdIntToPos(int lba, unsigned char *msf)
+CdlLOC *CdIntToPos(int lba, CdlLOC *msf)
 {
+    if (!msf) return NULL;
+    unsigned char *b = (unsigned char *)msf;
     int total = lba + 150;
     int f = total % 75;
     total /= 75;
     int s = total % 60;
     int m = total / 60;
-    msf[0] = (unsigned char)(((m / 10) << 4) | (m % 10));
-    msf[1] = (unsigned char)(((s / 10) << 4) | (s % 10));
-    msf[2] = (unsigned char)(((f / 10) << 4) | (f % 10));
+    b[0] = (unsigned char)(((m / 10) << 4) | (m % 10));
+    b[1] = (unsigned char)(((s / 10) << 4) | (s % 10));
+    b[2] = (unsigned char)(((f / 10) << 4) | (f % 10));
+    return msf;
 }
 
-int CdControl(unsigned char com, const unsigned char *param, unsigned char *result)
+int CdControl(unsigned char com, unsigned char *param, unsigned char *result)
 {
     if (result) *result = (s_cd.status != 0) ? s_cd.status : 0x02; /* 0x02 = CdlStatStandby */
 
@@ -688,7 +693,7 @@ int CdControl(unsigned char com, const unsigned char *param, unsigned char *resu
         return 1;
     case CdlSetloc:
         if (param) {
-            uint32_t lba = (uint32_t)CdPosToInt(param);
+            uint32_t lba = (uint32_t)CdPosToInt((CdlLOC *)param);
             s_cd.current_lba = lba;
             PspCdrom_SeekLba(lba);
         }
@@ -709,12 +714,12 @@ int CdControl(unsigned char com, const unsigned char *param, unsigned char *resu
     }
 }
 
-int CdControlF(unsigned char com, const unsigned char *param)
+int CdControlF(unsigned char com, unsigned char *param)
 {
     return CdControl(com, param, NULL);
 }
 
-int CdControlB(unsigned char com, const unsigned char *param, unsigned char *result)
+int CdControlB(unsigned char com, unsigned char *param, unsigned char *result)
 {
     return CdControl(com, param, result);
 }
@@ -878,7 +883,7 @@ CdlLOC *DsIntToPos(int i, CdlLOC *p)
     return p;
 }
 
-DslFILE *DsSearchFile(DslFILE *file, const char *name)
+DslFILE *DsSearchFile(DslFILE *file, char *name)
 {
     static DslFILE s_static_file;
     DslFILE *out_file = file ? file : &s_static_file;
@@ -996,7 +1001,7 @@ DslFILE *DsSearchFile(DslFILE *file, const char *name)
     return NULL;
 }
 
-int CdRom_ReadSectors(uint32_t lba, uint32_t offset, void *destination, uint32_t size)
+int PspCdrom_ReadDiscSectors(uint32_t lba, uint32_t offset, void *destination, uint32_t size)
 {
     if (!destination || size == 0) return 0;
     uint8_t *dst = (uint8_t *)destination;
@@ -1009,12 +1014,17 @@ int CdRom_ReadSectors(uint32_t lba, uint32_t offset, void *destination, uint32_t
     return 0;
 }
 
-int CdRom_ReadSectorsFromLba(uint32_t lba, void *destination, uint32_t size)
+int __attribute__((weak)) CdRom_ReadSectors(u32 lba, u32 offset, void *destination, u32 size)
 {
-    return CdRom_ReadSectors(lba, 0, destination, size);
+    return PspCdrom_ReadDiscSectors(lba, offset, destination, size);
 }
 
-int CdRom_PollReady(void)
+int __attribute__((weak)) CdRom_ReadSectorsFromLba(u32 lba, void *destination, u32 size)
+{
+    return PspCdrom_ReadDiscSectors(lba, 0, destination, size);
+}
+
+int __attribute__((weak)) CdRom_PollReady(void)
 {
     return 0;
 }
@@ -1036,17 +1046,18 @@ int DsRead(CdlLOC *position, int sectors, void *destination, int mode)
     (void)mode;
     if (!position || !destination) return 0;
     int lba = DsPosToInt(position);
-    return CdRom_ReadSectors((uint32_t)lba, 0, destination, (uint32_t)sectors);
+    int res = PspCdrom_ReadDiscSectors((uint32_t)lba, 0, destination, (uint32_t)sectors);
+    return (res == 0) ? 1 : 0;
 }
 
 int DsControl(unsigned char command, void *param, void *result)
 {
-    return CdControl(command, (const unsigned char *)param, (unsigned char *)result);
+    return CdControl(command, (unsigned char *)param, (unsigned char *)result);
 }
 
 int DsControlB(unsigned char command, void *param, void *result)
 {
-    return CdControlB(command, (const unsigned char *)param, (unsigned char *)result);
+    return CdControlB(command, (unsigned char *)param, (unsigned char *)result);
 }
 
 int DsSystemStatus(void)
@@ -1081,6 +1092,21 @@ CdlLOC *DsLastPos(CdlLOC *destination) {
     if (destination) *destination = s_last_pos;
     return &s_last_pos;
 }
+
+void DsInit(void) {}
+void DsSetDebug(int level) { (void)level; }
+int DsCommand(unsigned char com, const unsigned char *param, int mode) {
+    (void)com; (void)param; (void)mode;
+    return 1;
+}
+int DsReadBreak(void) { return 0; }
+int DsStatus(void) { return 1; }
+int DsSync(int mode, unsigned char *result) {
+    (void)mode;
+    if (result) *result = 0;
+    return 0;
+}
+
 
 /* ── PS1 MDEC & STR Movie Streaming (In-Place IDCT) ─────────────────────────── */
 

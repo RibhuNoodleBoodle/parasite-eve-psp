@@ -266,3 +266,39 @@ uint16_t HostWindow_PadRaw(void)
     PspInput_Poll();
     return s_pad_word;
 }
+
+static uint8_t *s_pad_direct_buf[2] = {NULL, NULL};
+
+void PadInitDirect(unsigned char *pad1, unsigned char *pad2) {
+    s_pad_direct_buf[0] = pad1;
+    s_pad_direct_buf[1] = pad2;
+    PspInput_Init();
+}
+
+void PadStartCom(void) {}
+
+int PadGetState(int port) {
+    (void)port;
+    return 6; /* PadStateStable */
+}
+
+int PadInfoMode(int port, int term, int offs) {
+    (void)port; (void)term; (void)offs;
+    return 4; /* Standard controller */
+}
+
+int PadSetAct(int port, unsigned char *act, int len) {
+    (void)port; (void)act; (void)len;
+    return 1;
+}
+
+int PadSetActAlign(int port, const unsigned char *align) {
+    (void)port; (void)align;
+    return 1;
+}
+
+int PadSetMainMode(int socket, int mode, int lock) {
+    (void)socket; (void)mode; (void)lock;
+    return 1;
+}
+

@@ -1356,6 +1356,7 @@ void PspGpu_DrawOTag(const uint32_t *ot, int count) {
     }
 
     PspGpu_EndFrame();
+    g_psp_gpu.frame_drawn = 1;
 }
 
 void PspGpu_DrawOTagEnv(const uint32_t *ot, int count, const DRAWENV *env) {
@@ -1406,20 +1407,32 @@ int DrawSync(int mode) {
 
 int VSync(int mode) {
     (void)mode;
-    if (!g_psp_gpu.in_frame) {
-        PspGpu_BeginFrame();
-        psp_render_vram_dispenv();
-        PspGpu_EndFrame();
-    } else {
+    if (g_psp_gpu.in_frame) {
         sceKernelDcacheWritebackInvalidateAll();
         sceGuFinish();
         sceGuSync(0, 0);
         g_psp_gpu.in_frame = 0;
+        g_psp_gpu.frame_drawn = 1;
+    } else if (!g_psp_gpu.frame_drawn) {
+        PspGpu_BeginFrame();
+        psp_render_vram_dispenv();
+        PspGpu_EndFrame();
     }
+    g_psp_gpu.frame_drawn = 0;
+
     sceDisplayWaitVblankStart();
     g_psp_gpu.disp_buffer = g_psp_gpu.draw_buffer;
     g_psp_gpu.draw_buffer = sceGuSwapBuffers();
     g_psp_gpu.frame_counter++;
+
+    if (g_psp_gpu.frame_counter % 60 == 0) {
+        uint32_t vram_nonzero = 0;
+        for (int p = 0; p < PS1_VRAM_PIXELS; p++) {
+            if (g_ps1_vram[p] != 0) vram_nonzero++;
+        }
+        fprintf(stderr, "[PSP_GPU] Frame %u: PS1 Shadow VRAM non-zero pixels = %u / %u | GE Framebuf Flipped (4:3 Viewport)\n",
+                (unsigned int)g_psp_gpu.frame_counter, (unsigned int)vram_nonzero, PS1_VRAM_PIXELS);
+    }
 
     if (s_vsync_callback) {
         s_vsync_callback();
@@ -1427,47 +1440,78 @@ int VSync(int mode) {
     return 0;
 }
 
-int ResetGraph(int mode) {
+void ResetGraph(int mode) {
     (void)mode;
     PspGpu_Reset();
-    return 0;
 }
 
-int SetDispMask(int mask) {
+void SetDispMask(int mask) {
     PspGpu_SetDispMask(mask);
-    return 0;
 }
 
-int LoadImage(const RECT *rect, const void *pixels) {
+int LoadImage(RECT *rect, void *pixels) {
     return PspGpu_LoadImage(rect, pixels);
 }
 
-int StoreImage(const RECT *rect, void *pixels) {
+int StoreImage(RECT *rect, void *pixels) {
     return PspGpu_StoreImage(rect, pixels);
 }
 
-int MoveImage(const RECT *src, int dst_x, int dst_y) {
-    return PspGpu_MoveImage(src, dst_x, dst_y);
+void MoveImage(RECT *src, int dst_x, int dst_y) {
+    PspGpu_MoveImage(src, dst_x, dst_y);
 }
 
-void ClearImage(const RECT *rect, uint8_t r, uint8_t g, uint8_t b) {
-    PspGpu_ClearImage(rect, r, g, b);
+void ClearImage(RECT *rect, int r, int g, int b) {
+    PspGpu_ClearImage(rect, (uint8_t)r, (uint8_t)g, (uint8_t)b);
 }
 
-DRAWENV *PutDrawEnv(const DRAWENV *env) {
+DRAWENV *PutDrawEnv(DRAWENV *env) {
     return PspGpu_PutDrawEnv(env);
 }
 
-DISPENV *PutDispEnv(const DISPENV *env) {
+DISPENV *PutDispEnv(DISPENV *env) {
     return PspGpu_PutDispEnv(env);
 }
 
-void DrawOTag(const uint32_t *ot) {
-    PspGpu_DrawOTag(ot, 4096);
+int DrawOTag(u_int *ot) {
+    PspGpu_DrawOTag((const uint32_t *)ot, 4096);
+    return 0;
 }
 
-void DrawPrim(const void *p) {
+int DrawPrim(void *p) {
     if (p) {
+        if (!g_psp_gpu.in_frame) {
+            PspGpu_BeginFrame();
+            psp_render_vram_dispenv();
+        }
         PspGpu_ExecuteSinglePrim((const uint32_t *)p);
+        g_psp_gpu.frame_drawn = 1;
+    }
+    return 0;
+}
+
+DRAWENV *SetDefDrawEnv(DRAWENV *env, int x, int y, int w, int h) {
+    return PspGpu_SetDefDrawEnv(env, x, y, w, h);
+}
+
+DISPENV *SetDefDispEnv(DISPENV *env, int x, int y, int w, int h) {
+    return PspGpu_SetDefDispEnv(env, x, y, w, h);
+}
+
+void SetDrawTPage(void *p, int dfe, int dtd, int tpage) {
+    uint32_t *pkt = (uint32_t *)p;
+    if (pkt) {
+        pkt[0] = 0x01000000 | ((uint32_t)(dfe ? 1 : 0) << 9) | ((uint32_t)(dtd ? 1 : 0) << 8);
+        pkt[1] = 0xE1000000 | (tpage & 0xFFFF);
     }
 }
+
+uint32_t *ClearOTagR(uint32_t *ot, int count) {
+    if (!ot || count <= 0) return ot;
+    for (int i = count - 1; i > 0; i--) {
+        ot[i] = (uint32_t)(uintptr_t)&ot[i - 1];
+    }
+    ot[0] = 0x00FFFFFF;
+    return ot;
+}
+
