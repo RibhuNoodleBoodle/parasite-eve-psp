@@ -79,8 +79,14 @@ typedef struct BattleCmdEntry {
     /* 0x04 */ BattleCmdPayload payload;
 } BattleCmdEntry;
 
+#ifndef BATTLE_CMD_OFFSETOF
+#if defined(__GNUC__) && (__GNUC__ >= 4)
+#define BATTLE_CMD_OFFSETOF(type, member) __builtin_offsetof(type, member)
+#else
 #define BATTLE_CMD_OFFSETOF(type, member) \
     ((unsigned int)&(((type *)0)->member))
+#endif
+#endif
 #define BATTLE_CMD_STATIC_ASSERT(condition, name) \
     typedef char battle_cmd_static_assert_##name[(condition) ? 1 : -1]
 

@@ -63,12 +63,21 @@ typedef struct SpuReverbState {
     s32 feedback;
 } SpuReverbState;
 typedef char SpuReverbStateSizeCheck[(sizeof(SpuReverbState) == 16) ? 1 : -1];
+#if defined(__GNUC__) && (__GNUC__ >= 4)
+typedef char SpuReverbStateDepthCheck[
+    (__builtin_offsetof(SpuReverbState, depth) == 4) ? 1 : -1];
+typedef char SpuReverbStateDelayCheck[
+    (__builtin_offsetof(SpuReverbState, delay) == 8) ? 1 : -1];
+typedef char SpuReverbStateFeedbackCheck[
+    (__builtin_offsetof(SpuReverbState, feedback) == 12) ? 1 : -1];
+#else
 typedef char SpuReverbStateDepthCheck[
     ((unsigned long)&((SpuReverbState *)0)->depth == 4) ? 1 : -1];
 typedef char SpuReverbStateDelayCheck[
     ((unsigned long)&((SpuReverbState *)0)->delay == 8) ? 1 : -1];
 typedef char SpuReverbStateFeedbackCheck[
     ((unsigned long)&((SpuReverbState *)0)->feedback == 12) ? 1 : -1];
+#endif
 extern SpuReverbState g_SpuReverbState;
 extern u16 _spu_voice_centerNote[24];
 extern int _spu_rev_flag, _spu_rev_reserve_wa, D_8009B46C;
@@ -92,8 +101,13 @@ typedef struct SpuAddressUnit {
     s32 mask;
 } SpuAddressUnit;
 typedef char SpuAddressUnitSizeCheck[(sizeof(SpuAddressUnit) == 16) ? 1 : -1];
+#if defined(__GNUC__) && (__GNUC__ >= 4)
+typedef char SpuAddressUnitShiftCheck[
+    (__builtin_offsetof(SpuAddressUnit, shift) == 4) ? 1 : -1];
+#else
 typedef char SpuAddressUnitShiftCheck[
     ((unsigned long)&((SpuAddressUnit *)0)->shift == 4) ? 1 : -1];
+#endif
 extern SpuAddressUnit _spu_mem_mode;
 extern SpuRegs *_spu_RXX;
 extern u32 *_spu_sys_pcr;

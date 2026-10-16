@@ -27,7 +27,13 @@ typedef struct GpuDebugState {
 
 #define PE1_GPU_STATE_STATIC_ASSERT(expr, name) \
     typedef char pe1_gpu_state_assert_##name[(expr) ? 1 : -1]
+#ifndef PE1_GPU_STATE_OFFSETOF
+#if defined(__GNUC__) && (__GNUC__ >= 4)
+#define PE1_GPU_STATE_OFFSETOF(type, member) __builtin_offsetof(type, member)
+#else
 #define PE1_GPU_STATE_OFFSETOF(type, member) ((unsigned int)&(((type *)0)->member))
+#endif
+#endif
 
 /* Complete SYS.OBJ state, including its cached drawing/display settings. */
 typedef struct GpuSystemState {

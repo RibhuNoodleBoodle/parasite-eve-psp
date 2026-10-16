@@ -9,8 +9,13 @@ typedef struct AkaoFilePrefix {
 } AkaoFilePrefix;
 
 typedef char akao_file_prefix_size[(sizeof(AkaoFilePrefix) == 4) ? 1 : -1];
+#if defined(__GNUC__) && (__GNUC__ >= 4)
+typedef char akao_file_prefix_contents[
+    (__builtin_offsetof(AkaoFilePrefix, contents) == 4) ? 1 : -1];
+#else
 typedef char akao_file_prefix_contents[
     ((unsigned int)&((AkaoFilePrefix *)0)->contents == 4) ? 1 : -1];
+#endif
 
 int Spu_ValidateSampleHeader(void *header);
 

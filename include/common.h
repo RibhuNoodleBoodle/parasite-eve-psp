@@ -16,7 +16,13 @@ typedef float f32;
 #define PE1_STATIC_ASSERT(expr, name) \
     typedef char pe1_static_assert_##name[(expr) ? 1 : -1]
 
+#ifndef PE1_OFFSETOF
+#if defined(__GNUC__) && (__GNUC__ >= 4)
+#define PE1_OFFSETOF(type, member) __builtin_offsetof(type, member)
+#else
 #define PE1_OFFSETOF(type, member) ((u32)&(((type *)0)->member))
+#endif
+#endif
 
 /*
  * Compiler scheduling helpers for byte-matching GCC 2.7.2 output. These emit

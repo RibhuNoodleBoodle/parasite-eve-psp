@@ -5,7 +5,13 @@
 
 #define PE1_GPU_STATIC_ASSERT(expr, name) \
     typedef char pe1_gpu_static_assert_##name[(expr) ? 1 : -1]
+#ifndef PE1_GPU_OFFSETOF
+#if defined(__GNUC__) && (__GNUC__ >= 4)
+#define PE1_GPU_OFFSETOF(type, member) __builtin_offsetof(type, member)
+#else
 #define PE1_GPU_OFFSETOF(type, member) ((unsigned int)&(((type *)0)->member))
+#endif
+#endif
 
 typedef struct RECT {
     short x;

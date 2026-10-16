@@ -3,6 +3,10 @@
 
 #include "pe1/gte_types.h"
 
+#if defined(ENABLE_PSP) || defined(__psp__) || defined(__mips_allegrex__)
+#include "pe1/gte_psp.h"
+#else
+
 /*
  * PSY-Q-style GTE operations.  Keep these macros limited to COP2 state and
  * commands; the calling function owns all normal CPU-side algorithmic work.
@@ -1069,5 +1073,7 @@
                  "ctc2 $13,$19\n\t" \
                  "ctc2 $14,$20" \
                  : : "r"(r0) : "$12", "$13", "$14")
+
+#endif /* !ENABLE_PSP */
 
 #endif
