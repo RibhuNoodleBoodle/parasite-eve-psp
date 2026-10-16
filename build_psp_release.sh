@@ -49,12 +49,12 @@ PACK_PBP="${PSPDEV}/bin/pack-pbp"
 COMMON_CFLAGS=(
     -O2 -G0 -march=allegrex -mfp32 -mgp32 -ffast-math -fno-strict-aliasing
     -Wall -Wextra -Wno-unused-parameter -Wno-unused-variable -Wno-incompatible-pointer-types
-    -std=gnu99
+    -Wno-int-conversion -std=gnu99
     -D_PSP_FW_VERSION=600 -DENABLE_PSP -D__psp__
-    -DPSP_DISC1_PATH="\"ms0:/PSP/GAME/ParasiteEve/disc/PE_DISC1.BIN\""
-    -DPSP_DISC1_FALLBACK="\"./disc/PE_DISC1.BIN\""
-    -DPSP_DISC2_PATH="\"ms0:/PSP/GAME/ParasiteEve/disc/PE_DISC2.BIN\""
-    -DPSP_DISC2_FALLBACK="\"./disc/PE_DISC2.BIN\""
+    -DPSP_DISC1_PATH="\"ms0:/PSP/GAME/ParasiteEve/disc/PE_DISC1.bin\""
+    -DPSP_DISC1_FALLBACK="\"./disc/PE_DISC1.bin\""
+    -DPSP_DISC2_PATH="\"ms0:/PSP/GAME/ParasiteEve/disc/PE_DISC2.bin\""
+    -DPSP_DISC2_FALLBACK="\"./disc/PE_DISC2.bin\""
     -Iinclude -Ipc_port -Ipc_port/platform -Itools/m2c
     -I"${PSPDEV}/psp/include"
     -I"${PSPDEV}/psp/include/SDL"
@@ -161,7 +161,7 @@ fi
 # ==============================================================================
 log_stage "2" "Compile pc_port/psp_*.c hardware abstraction layer"
 
-mkdir -p "${OBJ_HAL_DIR}"
+rm -rf "${OBJ_HAL_DIR}" && mkdir -p "${OBJ_HAL_DIR}"
 
 HAL_SOURCES=(
     "pc_port/psp_gpu_gu.c"
@@ -171,6 +171,7 @@ HAL_SOURCES=(
     "pc_port/psp_sdl_audio.c"
     "pc_port/psp_cdrom_iso.c"
     "pc_port/psp_overlay_mgr.c"
+    "pc_port/psp_decomp_glue.c"
 )
 
 log_info "Compiling PSP Hardware Abstraction Layer translation units..."
@@ -208,20 +209,22 @@ fi
 # ==============================================================================
 log_stage "3" "Compile src/ core EXE and overlay translation units for MIPS Allegrex"
 
-mkdir -p "${OBJ_DECOMP_DIR}"
+rm -rf "${OBJ_DECOMP_DIR}" && mkdir -p "${OBJ_DECOMP_DIR}"
 
-DECOMP_SAMPLE_SRCS=(
+DECOMP_SOURCES=(
     "src/main/boot/main.c"
     "src/main/boot/init.c"
-    "src/main/boot/frame_loop.c"
-    "src/main/aya/stats.c"
-    "src/main/battle/attack.c"
-    "src/main/akao/sequencer.c"
-    "src/overlays/room_lib/actor_classes.c"
+    "src/main/asset/game_state.c"
+    "src/main/cdrom/scene_assets.c"
+    "src/main/pm/disc_tables.c"
+    "src/overlays/menu_memcard/list_screen.c"
+    "src/overlays/menu_memcard/page_flip.c"
+    "src/overlays/menu_memcard/fade.c"
+    "src/overlays/menu_memcard/image_nodes.c"
 )
 
 log_info "Compiling representative decompiled translation units with -G0 Allegrex flags..."
-for src_file in "${DECOMP_SAMPLE_SRCS[@]}"; do
+for src_file in "${DECOMP_SOURCES[@]}"; do
     if [[ -f "${src_file}" ]]; then
         base_name="$(basename "${src_file}" .c)"
         obj_out="${OBJ_DECOMP_DIR}/${base_name}.o"
@@ -256,6 +259,7 @@ PBP_OUT="${BUILD_DIR}/EBOOT.PBP"
 
 log_info "Linking ELF executable (${ELF_OUT})..."
 HAL_OBJS=("${OBJ_HAL_DIR}"/*.o)
+DECOMP_OBJS=("${OBJ_DECOMP_DIR}"/*.o)
 
 "${CC}" -specs="${PSPSDK}/lib/prxspecs" \
         -Wl,-q,-T"${PSPSDK}/lib/linkfile.prx" \
@@ -263,6 +267,7 @@ HAL_OBJS=("${OBJ_HAL_DIR}"/*.o)
         -L"${PSPDEV}/psp/lib" \
         -L"${PSPSDK}/lib" \
         "${HAL_OBJS[@]}" \
+        "${DECOMP_OBJS[@]}" \
         "${PSPSDK}/lib/prxexports.o" \
         "${LINK_LIBS[@]}" \
         -o "${ELF_OUT}"

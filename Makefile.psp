@@ -36,10 +36,18 @@ ifeq ($(strip $(HAL_SRCS)),)
 endif
 
 # Decompiled PS1 EXE & Overlay source translation units
-DECOMP_SRCS := $(filter-out src/psp_%.c, $(wildcard src/*.c src/main/*.c src/main/*/*.c src/overlays/*/*.c))
+DECOMP_SRCS := src/main/boot/main.c \
+               src/main/boot/init.c \
+               src/main/asset/game_state.c \
+               src/main/cdrom/scene_assets.c \
+               src/main/pm/disc_tables.c \
+               src/overlays/menu_memcard/list_screen.c \
+               src/overlays/menu_memcard/page_flip.c \
+               src/overlays/menu_memcard/fade.c \
+               src/overlays/menu_memcard/image_nodes.c
 
-# Combined translation units (HAL runtime executable)
-C_SRCS   := $(HAL_SRCS)
+# Combined translation units (HAL runtime executable + authentic decompiled logic)
+C_SRCS   := $(HAL_SRCS) $(DECOMP_SRCS)
 
 # Generated object files
 OBJS     := $(patsubst %.c,%.o,$(C_SRCS))
@@ -74,7 +82,8 @@ INCDIR   = $(PSPDEV)/psp/include \
 # -DENABLE_PSP -D__psp__: Target platform identifiers
 CFLAGS   = -O2 -G0 -march=allegrex -mfp32 -mgp32 -ffast-math -fno-strict-aliasing \
            -Wall -Wextra -Wno-unused-parameter -Wno-unused-variable \
-           -Wno-incompatible-pointer-types -Wno-implicit-function-declaration -std=gnu99 \
+           -Wno-incompatible-pointer-types -Wno-implicit-function-declaration \
+           -Wno-int-conversion -std=gnu99 \
            -D_PSP_FW_VERSION=600 -DENABLE_PSP -D__psp__ \
            -DPSP_DISC1_PATH="\"ms0:/PSP/GAME/ParasiteEve/disc/PE_DISC1.bin\"" \
            -DPSP_DISC1_FALLBACK="\"./disc/PE_DISC1.bin\"" \
