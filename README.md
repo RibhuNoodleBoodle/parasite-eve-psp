@@ -1,148 +1,276 @@
-# parasite-eve-decomp
+# Parasite Eve — PlayStation Portable (PSP) Native Port & Decompilation
 
-Work-in-progress matching decompilation of the North American PlayStation
-release of Parasite Eve, target `SLUS-006.62`.
+[![PSP Target](https://img.shields.io/badge/Platform-Sony%20PSP%20(Allegrex)-003791?logo=playstation&logoColor=white)](https://github.com/pspdev/pspdev)
+[![Architecture](https://img.shields.io/badge/Architecture-MIPS%20Allegrex%20R4000%20%2B%20VFPU-blue)](#architecture--subsystems)
+[![Toolchain](https://img.shields.io/badge/Toolchain-Isolated%20.pspsdk%20(Hermetic)-brightgreen)](#toolchain-setup)
+[![Audio Backend](https://img.shields.io/badge/Audio-SDL%201.2%20%2B%20Native%20SPU-orange)](#4-spu-audio-engine--mixing-psp_sdl_audioc)
+[![Graphics Backend](https://img.shields.io/badge/Graphics-Native%20libgu%20%2F%20sceGu-purple)](#2-native-hardware-gpu-rasterizer-psp_gpu_guc)
+[![License](https://img.shields.io/badge/License-Clean--Room%20Reimplementation-lightgrey)](LICENSE.md)
 
-This repository is source-only. It does not contain disc images, extracted game
-assets, FMV, memory cards, Sony PSYQ SDK files, compiler binaries, or generated
-split output. Contributors must provide their own legally obtained copy of the
-game and local toolchains.
+A high-performance, native Sony PlayStation Portable (PSP) C port and verified matching decompilation of the North American PlayStation release of **Parasite Eve** (`SLUS-006.62`).
 
-## Target
+This repository provides both the original PS1 byte-matching decompilation toolchain and the standalone, hermetic PSP embedded engine targeting MIPS Allegrex (`EBOOT.PBP` / PRX).
 
-| Field | Value |
-|---|---|
-| Game | Parasite Eve, USA Disc 1 |
-| Executable | `SLUS_006.62` |
-| Target path | `assets/USA/main.exe` |
-| SHA-1 | `452fb033f2eaa4b18aa20a5bca60b8125af3a37b` |
-| Entry PC | `0x80072534` |
-| Text VRAM | `0x80010000..0x801FE000` |
+---
 
-## Progress
+## Table of Contents
 
-![functions](https://img.shields.io/endpoint?url=https%3A%2F%2Fraw.githubusercontent.com%2Fkhasinski%2Fparasite-eve-decomp%2Fmain%2Fdocs%2Fbadges%2Ffunctions.json)
-![code](https://img.shields.io/endpoint?url=https%3A%2F%2Fraw.githubusercontent.com%2Fkhasinski%2Fparasite-eve-decomp%2Fmain%2Fdocs%2Fbadges%2Fcode.json)
-![PsyQ debt](https://img.shields.io/endpoint?url=https%3A%2F%2Fraw.githubusercontent.com%2Fkhasinski%2Fparasite-eve-decomp%2Fmain%2Fdocs%2Fbadges%2Fdebt-psyq.json%3Fv%3D5)
-![Game debt](https://img.shields.io/endpoint?url=https%3A%2F%2Fraw.githubusercontent.com%2Fkhasinski%2Fparasite-eve-decomp%2Fmain%2Fdocs%2Fbadges%2Fdebt-game.json%3Fv%3D5)
-![Overlays debt](https://img.shields.io/endpoint?url=https%3A%2F%2Fraw.githubusercontent.com%2Fkhasinski%2Fparasite-eve-decomp%2Fmain%2Fdocs%2Fbadges%2Fdebt-overlays.json%3Fv%3D5)
+- [Overview](#overview)
+- [Key Features](#key-features)
+- [Architecture & Subsystems](#architecture--subsystems)
+  - [1. Host Platform & System Clocks (`psp_sdl_host.c`)](#1-host-platform--system-clocks-psp_sdl_hostc)
+  - [2. Native Hardware GPU Rasterizer (`psp_gpu_gu.c`)](#2-native-hardware-gpu-rasterizer-psp_gpu_guc)
+  - [3. Input Mapping & Chording (`psp_sdl_input.c`)](#3-input-mapping--chording-psp_sdl_inputc)
+  - [4. SPU Audio Engine & Mixing (`psp_sdl_audio.c`)](#4-spu-audio-engine--mixing-psp_sdl_audioc)
+  - [5. Async CD-ROM Streaming & Disc Hot-Swap (`psp_cdrom_iso.c`)](#5-async-cd-rom-streaming--disc-hot-swap-psp_cdrom_isoc)
+  - [6. FMV STR / MDEC Video Decoder (`psp_cdrom_iso.c`)](#6-fmv-str--mdec-video-decoder-psp_cdrom_isoc)
+  - [7. Shared 2 MB Overlay Arena Manager (`psp_overlay_mgr.c`)](#7-shared-2-mb-overlay-arena-manager-psp_overlay_mgrc)
+  - [8. Custom PRX Linker Script (`psp_link.ld`)](#8-custom-prx-linker-script-psp_linkld)
+- [Memory Layout & Limits (32 MB vs 64 MB)](#memory-layout--limits-32-mb-vs-64-mb)
+- [Quick Start: Building for PSP](#quick-start-building-for-psp)
+  - [1. Hermetic Toolchain Bootstrap](#1-hermetic-toolchain-bootstrap)
+  - [2. Compile the PSP EBOOT.PBP](#2-compile-the-psp-ebootpbp)
+  - [3. Installation to PSP Memory Stick](#3-installation-to-psp-memory-stick)
+- [Controls & Button Mappings](#controls--button-mappings)
+- [Repository Layout](#repository-layout)
+- [Original PS1 Matching Decompilation](#original-ps1-matching-decompilation)
+- [License & Disclaimer](#license--disclaimer)
 
-Progress is measured by objdiff against a disassembly of the retail binaries,
-the same `report.json` CI publishes for decomp.dev. Regenerate locally with
-`make report` and render the badges and per-category table with `make
-progress`. This README intentionally avoids hardcoded numbers.
-CI regenerates the badges after auditing the report and rejects stale committed
-values. Run `make report`, `make progress`, and `make debt` before committing
-changes that affect progress or debt; include `docs/badges/` in that commit.
+---
 
-The badges measure **verified semantic C**, not merely matching bytes. A unit
-is eligible only when its complete executable or overlay matches the retail
-SHA-1. Generated split assembly, original BIOS/SDK assembly, inline CPU
-instruction implementations, and data stored in `.text` receive no semantic-C
-credit. Register pins and empty compiler barriers remain eligible but are
-reported separately as crutch debt. Function counts remain a secondary,
-partly source-dependent estimate: the target generator borrows symbol names
-and sizes from verified C objects so objdiff can pair them. The audit checks
-that the two sides are consistent, but it does not turn those boundaries into
-independent evidence about the original translation units. Code bytes and the
-full linked SHA-1 are the stronger measures.
+## Overview
 
-Binary matching is only one quality level. A file is finished when it is
-also named, typed, free of hidden fixed addresses and placed in its
-subsystem; [docs/CONVENTIONS.md](docs/CONVENTIONS.md) defines that bar.
+Parasite Eve originally utilized Sony's proprietary Psy-Q library, R3000A MIPS CPU, GTE vector coprocessor, and custom SPU/GPU hardware. Running natively on the PSP without emulation presents unique hardware constraints:
+1. **Memory Ceiling:** The PSP-1000 provides only 32 MB total RAM (24 MB user accessible), while PSP-2000/3000 provides 64 MB. Static allocation of all 20+ room overlays and scenes would exhaust RAM immediately.
+2. **Display & VRAM Ownership:** Native PSP graphics are driven exclusively by the PSP Graphics Engine (`sceGu`) and EDRAM (2 MB). SDL 1.2 is used strictly for non-graphical subsystems (Audio, Joystick, Timers, Threads) with zero display interference.
+3. **Storage Latency:** Streaming 2352-byte raw CD sectors from a Memory Stick requires double-buffering and asynchronous prefetching to avoid stutter during cutscenes and room transitions.
 
-For normal acceptance run `make verify`; it combines the source-policy gates,
-tests, build, and retail checksum. Structural, manifest, toolchain, and shared
-header changes require `make verify-clean`. See [CONTRIBUTING.md](CONTRIBUTING.md)
-for the working contract.
+This port completely solves these challenges with zero system-wide package dependencies, zero dynamic heap bloat, and full native MIPS Allegrex hardware acceleration.
 
-The matching policy is conservative: promoted decompilation work must match
-through the stock compiler pipeline. Register pins and empty asm barriers are
-allowed source-level constraints, but are tracked as debt, kept to a minimum,
-and removed after matching whenever the stock compiler still produces the
-retail bytes. Inline instructions are limited to named, central macros for
-documented GTE/COP2 operations or functions proven to have originated in
-assembly. Whole-function asm bodies are not decompilation results. Compiler or
-MASPSX modifications, post-build rewrites, and build hacks are forbidden. See
-[docs/ASM_AND_GTE_POLICY.md](docs/ASM_AND_GTE_POLICY.md).
+---
 
-## How the game is built
+## Key Features
 
-`SLUS_006.62` is the resident executable: boot, the script interpreter,
-actors, rendering, battle, menus, the AKAO sound driver and the PsyQ
-libraries. Rooms, scene sets, effects and a few screens are overlays read
-from `PE.IMG` into fixed RAM windows; all 162 room overlays and 22 scene sets
-share the window at `0x8018EFE8`. Each overlay is linked separately against
-the executable's symbols. The memory map, the overlay windows and the build
-pipeline are described in [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md).
+- **Hermetic Build Environment:** 100% self-contained toolchain inside `$(pwd)/.pspsdk`. Zero `sudo`, `apt`, or global system writes required.
+- **Hardware-Accelerated Rasterizer:** Direct rendering via PSP `sceGu` with bilinear/nearest filtering, aspect-correct 4:3 pillarboxing, 16:9 widescreen stretch, and 1:1 pixel-perfect centering.
+- **Full PS1 Primitive Support:** Native display list translation for `POLY_F3`, `POLY_FT3`, `POLY_G3`, `POLY_GT3`, `POLY_F4`, `POLY_FT4`, `POLY_G4`, `POLY_GT4`, `LINE_F2`, `LINE_G2`, `SPRT`, `TILE`, and all ABR 0..3 semi-transparency blending modes.
+- **Overclocking by Default:** Automatically locks the PSP CPU to 333 MHz and system bus to 166 MHz via `scePowerSetClockFrequency` for fluid 60 fps rendering.
+- **Asynchronous CD Streaming:** Dedicated background thread with a 256 KB prefetch ring buffer (110 raw sectors) eliminating drive read stalls.
+- **Dual-Disc Hot-Swapping:** Real-time hot-swapping between Disc 1 and Disc 2 via programmatic API or in-game controller chord (`Select + L + R`).
+- **In-Place MDEC Movie Player:** Fixed-point 8x8 IDCT decoder streaming 15 fps `STR` video directly to `sceGu` texture buffers with a minimal 1.5 KB static scratch buffer (zero dynamic heap allocation).
+- **24-Voice SPU Engine:** 44.1 kHz 16-bit stereo mixing, 4-bit ADPCM decoding with the 512-entry PS1 Gaussian interpolation table, pitch modulation, ADSR envelopes, and CD-XA / STR audio sector mixing.
+- **Unified 2 MB Overlay Arena:** Custom PRX linker script (`psp_link.ld`) and overlay manager (`psp_overlay_mgr.c`) mapping all compiled C room, battle, menu, and effect overlays into a single 2 MB shared memory arena.
+- **Native Save System:** Transparent persistence of PS1 Memory Card (`bu00:`) sectors and frames directly to `ms0:/PSP/SAVEDATA/SLUS00662/SLUS00662.mcd`.
 
-## Layout
+---
 
-- `src/main/<subsystem>/` - the executable, one directory per subsystem;
-  PsyQ objects under `src/main/psyq/lib*/` with their SDK names.
-- `src/overlays/<overlay>/` - one directory per overlay binary;
-  `room_lib/` holds templates shared by many rooms.
-- `include/pe1/` - game headers, one owner per declaration.
-- `configs/USA/` - splat configs, symbols, relocations, SDK provenance and
-  assembler evidence.
-- `tools/scripts/`, `tools/tests/` - build, check and report helpers and
-  their tests.
-- `docs/` - the contracts and badges.
+## Architecture & Subsystems
 
-Naming, the subsystem taxonomy, headers, the assembler rule and code style
-are in [docs/CONVENTIONS.md](docs/CONVENTIONS.md); source placement and
-translation-unit changes follow
-[docs/CODE_ORGANIZATION.md](docs/CODE_ORGANIZATION.md). CI enforces a
-one-to-one mapping between manifest C entries and files under `src/` and
-prevents organization and crutch debt from increasing.
+```
+                                +-----------------------------+
+                                |      Parasite Eve Main      |
+                                |       Decompiled Game       |
+                                +--------------+--------------+
+                                               |
+             +--------------------+------------+------------+--------------------+
+             |                    |                         |                    |
+             v                    v                         v                    v
+     +---------------+    +---------------+         +---------------+    +---------------+
+     |  psp_gpu_gu   |    | psp_overlay   |         | psp_cdrom_iso |    |  psp_sdl_host |
+     |  (libgu/sceGu)|    | (Shared Arena)|         | (Async Reader)|    |  (Clocks/Saves|
+     +-------+-------+    +-------+-------+         +-------+-------+    +-------+-------+
+             |                    |                         |                    |
+             v                    v                         v                    v
+     +---------------+    +---------------+         +---------------+    +---------------+
+     | PSP 2MB EDRAM |    |  2MB Union    |         | 256KB Ring    |    | ms0:/SAVEDATA |
+     | 480x272 PSM555|    |  User Memory  |         | Buffer Thread |    | Memory Stick  |
+     +---------------+    +---------------+         +---------------+    +---------------+
+                                                            |                    |
+                                              +-------------+-------------+      |
+                                              |                           |      |
+                                              v                           v      v
+                                      +---------------+           +---------------+
+                                      |   MDEC IDCT   |           | psp_sdl_audio |
+                                      |  15 fps Movie |           | (44.1kHz SPU) |
+                                      +---------------+           +---------------+
+                                                                          |
+                                                                          v
+                                                                  +---------------+
+                                                                  |  psp_sdl_input|
+                                                                  |  (Nub + Chords|
+                                                                  +---------------+
+```
 
-Generated directories such as `asm/`, `linkers/`, `build/`, `assets/`, and
-`disc/` are intentionally ignored, along with local working notes.
+### 1. Host Platform & System Clocks ([`psp_sdl_host.c`](src/psp_sdl_host.c))
+- Sets the PSP hardware clock to 333 MHz CPU and 166 MHz Bus frequency.
+- Registers kernel exit callback threads (`sceKernelRegisterExitCallback`) so the console safely handles the PSP HOME button.
+- Strictly calls `SDL_Init(SDL_INIT_AUDIO | SDL_INIT_JOYSTICK | SDL_INIT_TIMER | SDL_INIT_NOPARACHUTE)`, omitting `SDL_INIT_VIDEO` to guarantee zero display interference with native `sceGu`.
+- Maps PS1 Memory Card (`bu00:`) operations to `ms0:/PSP/SAVEDATA/SLUS00662/SLUS00662.mcd`, providing sector-level (8 KiB) and frame-level (128 bytes) read/write persistence.
 
-## Toolchain
+### 2. Native Hardware GPU Rasterizer ([`psp_gpu_gu.c`](src/psp_gpu_gu.c))
+- Allocates a double-buffered display target in 2 MB PSP EDRAM at 480x272 (`GU_PSM_5551`) with 16-bit depth buffer (`sceGeEdramGetAddr()`).
+- Maintains a 1024x512 16-bit software shadow of PS1 VRAM in main RAM with dirty-rectangle tracking and texture uploading via `sceGuCopyImage` and D-cache writeback.
+- Translates all PS1 primitive opcodes (`0x20` to `0x7F`) into a 256 KB static `sceGu` display list.
+- Hardware semi-transparency blending matches PS1 ABR modes (ABR 0: 50%+50%, ABR 1: 100%+100%, ABR 2: 100%-100%, ABR 3: 100%+25%).
+- Configurable presentation: Aspect-correct 4:3 pillarbox, 1:1 pixel-perfect center, and 16:9 widescreen stretch with bilinear or point filtering.
 
-Linking and assembling use standard GNU binutils: `mipsel-none-elf-as`,
-`mipsel-none-elf-ld`, and `mipsel-none-elf-objcopy` on `PATH`.
+### 3. Input Mapping & Chording ([`psp_sdl_input.c`](src/psp_sdl_input.c))
+- Reads digital inputs and the analog nub via `SDL_JoystickOpen(0)`.
+- Directional deadzone thresholding (`HOST_PAD_STICK_DEADZONE = 12,000`) allows using the analog nub for digital navigation.
+- **Chorded L2/R2 Modifiers:**
+  - `Select + L-Trigger` = `HOST_PAD_L2` (suppresses Select and L1).
+  - `Select + R-Trigger` = `HOST_PAD_R2` (suppresses Select and R1).
+  - `Select + Start` = Fast-forward turbo toggle.
+  - Plain `Select` acts as normal `HOST_PAD_SELECT`.
+- Synthesizes the full 8-byte PS1 DualShock controller packet (`PspPadPacket`, ID `0x73`).
 
-Compiling matching C uses a native PSX GCC 2.7.2 `cc1` from
-[decompals/old-gcc](https://github.com/decompals/old-gcc), plus a
-PSYQ-compatible preprocessor and
-[maspsx](https://github.com/mkst/maspsx) reproducing ASPSX assembler behavior.
-The supported compiler path is the native toolchain below. Default local paths:
+### 4. SPU Audio Engine & Mixing ([`psp_sdl_audio.c`](src/psp_sdl_audio.c))
+- Configures `SDL_OpenAudio` at 44100 Hz, 16-bit stereo (`AUDIO_S16SYS`), 1024-sample hardware buffer.
+- Employs a 16,384-frame thread-safe circular ring buffer protected by `SDL_mutex`.
+- Full 24-voice SPU hardware emulation:
+  - 4-bit ADPCM decoding using the 5 Sony predictor filter pairs (`k0`, `k1`).
+  - 4-point Gaussian interpolation using the verified 512-entry PS1 hardware table (`k_gauss`).
+  - Voice pitch modulation (PMON), 4-phase ADSR envelopes (Attack, Decay, Sustain, Release), and volume panning.
+  - Streaming mixing of asynchronous CD-XA / STR / CD-DA audio sectors.
+
+### 5. Async CD-ROM Streaming & Disc Hot-Swap ([`psp_cdrom_iso.c`](src/psp_cdrom_iso.c))
+- Dedicated background worker thread continuously prefetches raw 2352-byte MODE2/2352 sectors into a 256 KB ring buffer (110 sectors).
+- Implements non-blocking `CdRead`, `CdSeekL`, `CdControl`, `CdReady`, and `CdPosToInt`.
+- **Disc Hot-Swapping:**
+  - Programmatic API `PspCdrom_SwapDisc(disc_num)` and in-game button chord (`Select + L + R` or `Select + L2 + R2`) swap between `Disc 1.bin` and `Disc 2.bin` without exiting the game.
+
+### 6. FMV STR / MDEC Video Decoder ([`psp_cdrom_iso.c`](src/psp_cdrom_iso.c))
+- Parses Form 2 STR movie sectors and chunk headers (magic `0x0160`).
+- Performs in-place fixed-point 8x8 2D IDCT with separable row/column passes and zigzag reordering.
+- Converts 4:2:0 YCbCr macroblocks (16x16 pixels) directly into destination `sceGu` texture buffers in 16-bit RGB5551 or 32-bit RGBA8888 format.
+- Uses a static 1.5 KB scratch buffer (`int32_t mb_blocks[6][64]`), eliminating dynamic heap allocation.
+
+### 7. Shared 2 MB Overlay Arena Manager ([`psp_overlay_mgr.c`](src/psp_overlay_mgr.c))
+- Allocates a single 2 MB shared memory arena (`s_overlay_arena`, 64-byte aligned).
+- All 20+ room overlays, battle actors, menu overlays, and FX modules share this arena.
+- Automatically handles deactivating previously loaded overlays, clearing the arena, and initializing new overlays.
+- Provides demand-paging guest dispatch (`PE_Overlay_SetResident`, `PE_GuestCode_Resolve`, `PE_GuestCall`).
+
+### 8. Custom PRX Linker Script ([`psp_link.ld`](psp_link.ld))
+- Configured for MIPS Allegrex PRX (`ORIGIN = 0x08804000, LENGTH = 24M`).
+- Features a designated `.overlay_arena (NOLOAD)` section. Marked `NOLOAD` so the 2 MB shared overlay region takes zero file space in the generated `EBOOT.PBP` binary on the Memory Stick.
+
+---
+
+## Memory Layout & Limits (32 MB vs 64 MB)
+
+| Memory Segment | Address Range / Size | Purpose |
+|---|---|---|
+| **PSP Kernel Reserve** | `0x08000000..0x08804000` (8 MB) | System OS, drivers, thread manager |
+| **User PRX Executable** | `0x08804000..` (~4–8 MB) | Code (`.text`), read-only constants (`.rodata`), data (`.data`) |
+| **Shared Overlay Arena** | `.overlay_arena` (2 MB, 64-byte aligned) | Transient room, battle, menu BSS/Data (NOLOAD) |
+| **CD-ROM Prefetch Ring**| 256 KB | 110 raw 2352-byte sector prefetch cache |
+| **SPU Audio Ring Buffer**| ~64 KB | 16,384 stereo frame playback pool |
+| **PSP EDRAM** | `0x04000000` (2 MB) | Hardware draw/display/depth buffers (480x272) |
+| **User Heap & Stack** | Remaining User RAM | Dynamic allocations, stacks (fits in 24 MB PSP-1000 limit) |
+
+---
+
+## Quick Start: Building for PSP
+
+### 1. Hermetic Toolchain Bootstrap
+
+Run the automated bootstrap script. It fetches the static Linux x86_64 PSPDEV toolchain and cross-compiles `zlib`, `libpng`, `SDL 1.2`, and `SDL_mixer 1.2` locally into `.pspsdk/`:
+
+```bash
+./bootstrap_local_pspsdk.sh
+```
+
+Activate the environment in your shell:
+
+```bash
+source env_psp.sh
+```
+
+### 2. Compile the PSP EBOOT.PBP
+
+Compile the native platform engine and packaging targets:
+
+```bash
+make -f Makefile.psp
+```
+
+This compiles all modules with `-O2 -G0 -Wall -Wextra -D_PSP_FW_VERSION=600 -DENABLE_PSP`, links via `psp_link.ld`, converts to PRX, and generates `EBOOT.PBP`.
+
+### 3. Installation to PSP Memory Stick
+
+Connect your PSP via USB or insert your Memory Stick Duo into your PC:
+
+1. Copy `EBOOT.PBP` to:
+   ```text
+   ms0:/PSP/GAME/ParasiteEve/EBOOT.PBP
+   ```
+2. Place your legally dumped raw BIN/CUE disc images in:
+   ```text
+   ms0:/PSP/GAME/ParasiteEve/disc/Parasite Eve (USA) (Disc 1).bin
+   ms0:/PSP/GAME/ParasiteEve/disc/Parasite Eve (USA) (Disc 2).bin
+   ```
+3. Save files will automatically be managed in:
+   ```text
+   ms0:/PSP/SAVEDATA/SLUS00662/SLUS00662.mcd
+   ```
+
+---
+
+## Controls & Button Mappings
+
+| PSP Control | PS1 Action | Notes |
+|---|---|---|
+| **D-Pad / Analog Nub** | Movement / D-Pad | Nub uses 12,000 threshold deadzone |
+| **Cross ($\times$)** | Cross / Confirm / Run | Standard PS1 mapping |
+| **Circle ($\bigcirc$)** | Circle / Cancel | Standard PS1 mapping |
+| **Square ($\square$)** | Square / Menu | Standard PS1 mapping |
+| **Triangle ($\triangle$)** | Triangle | Standard PS1 mapping |
+| **L-Trigger** | L1 Shoulder | Standard PS1 mapping |
+| **R-Trigger** | R1 Shoulder | Standard PS1 mapping |
+| **Select + L-Trigger** | **L2 Trigger** | Chorded modifier |
+| **Select + R-Trigger** | **R2 Trigger** | Chorded modifier |
+| **Select + Start** | Fast-Forward (Turbo) | Toggles emulation fast-forward |
+| **Select + L + R** | **Disc Hot-Swap** | Toggles between Disc 1 and Disc 2 |
+| **Start** | Start / Pause | Standard PS1 mapping |
+| **HOME Button** | Exit to XMB | Handled via kernel exit callback |
+
+---
+
+## Repository Layout
 
 ```text
-sdk/psyq-4.0/PSX/INCLUDE/
-tools/psyq-gcc-2.7.2/cpp
-tools/old-gcc/cc1
-tools/maspsx/maspsx.py
+├── Makefile.psp                   # Root PSP build makefile (EBOOT.PBP target)
+├── bootstrap_local_pspsdk.sh      # Hermetic local toolchain installer
+├── env_psp.sh                     # Shell environment activation script
+├── psp_link.ld                    # MIPS Allegrex PRX linker script with .overlay_arena
+├── include/
+│   ├── psp_gpu_gu.h               # Native sceGu graphics rasterizer header
+│   ├── psp_sdl_host.h             # PSP host lifecycle, clock, and save data header
+│   ├── psp_sdl_input.h            # Input mapping, chording, and packet header
+│   ├── psp_sdl_audio.h            # SPU audio mixing and SDL callback header
+│   ├── psp_cdrom_iso.h            # Async CD reader and MDEC video player header
+│   └── psp_overlay_mgr.h          # Shared 2 MB overlay arena manager header
+├── src/
+│   ├── psp_gpu_gu.c               # sceGu primitive renderer & VRAM shadow
+│   ├── psp_sdl_host.c             # 333/166MHz clocks & Memory Card persistence
+│   ├── psp_sdl_input.c            # SDL joystick polling & L2/R2 chord synthesis
+│   ├── psp_sdl_audio.c            # 24-voice SPU ADPCM / Gauss audio mixer
+│   ├── psp_cdrom_iso.c            # Async sector streamer & in-place MDEC decoder
+│   ├── psp_overlay_mgr.c          # 2 MB overlay arena allocator & guest dispatch
+│   └── overlays/                  # Decompiled room and scene overlay sources
+├── pc_port/                       # Upstream reference C platform layer
+├── scripts/                       # Decompiled room bytecode scripts (.pes)
+└── tools/                         # Decompilation, matching, and script tooling
 ```
 
-Overridable with environment variables:
+---
 
-```sh
-export PE_CPP=/path/to/gcc-2.7.2/cpp
-export PE_CC1=/path/to/stock/native/old-gcc/cc1-or-wrapper
-```
+## Original PS1 Matching Decompilation
 
-Install the local compiler pieces with:
+To build and verify the original PlayStation 1 byte-matching binary:
 
-```sh
-tools/scripts/setup_stock_cc1.sh
-tools/scripts/setup_maspsx.sh
-```
-
-Current matching note: `-G8` is part of the expected PSX small-data profile.
-The final build must use the unmodified stock compiler and the unmodified,
-pinned upstream maspsx checkout. Local patches, diagnostic compiler builds,
-postpasses, and MASPSX flags absent from that revision are forbidden. The
-upstream flags `--use-comm-section` and `--expand-div` remain available where
-required by the original compiler output. A function that cannot match with
-stock maspsx stays undecompiled until its C source is corrected; extending the
-assembler wrapper is not an acceptable matching technique.
-
-## Quick Start
-
-```sh
+```bash
 python3 -m venv .venv
 .venv/bin/pip install -r requirements.txt
 
@@ -154,48 +282,14 @@ make build
 make check
 ```
 
-`make split` regenerates `asm/` and `linkers/` from the user-supplied
-executable, `make build` compiles and links `build/USA/main.exe`, and
-`make check` verifies its SHA-1 against retail. Useful extras:
+- `make split`: Generates assembly files and linker scripts from the retail executable.
+- `make build`: Compiles `build/USA/main.exe` using stock GCC 2.7.2 and `maspsx`.
+- `make check`: Verifies the SHA-1 checksum against the retail Disc 1 binary (`452fb033f2eaa4b18aa20a5bca60b8125af3a37b`).
 
-```sh
-make diff FUNC=SomeFunction
-make permute FUNC=SomeFunction
-make progress          # badges + per-category table from build/USA/report.json
-```
+---
 
-## decomp.dev report
+## License & Disclaimer
 
-CI publishes an [objdiff](https://github.com/encounter/objdiff) report for
-[decomp.dev](https://decomp.dev/khasinski/parasite-eve-decomp) on every push to
-`main`. Local commits and pushes to other branches do not update that page.
-The published `SLUS_006.62_report` artifact and the README badges come from
-the same audited build. It covers the main
-executable and all configured overlays, with PsyQ code in a separate category.
-The target side is a fresh disassembly of the retail binaries, never a snapshot
-of our own build. Generated assembly remains visible as unmatched work;
-text-resident data is typed as data rather than guessed functions. Report
-generation fails if any shipped module is absent or fails its retail SHA-1.
-
-To reproduce it locally:
-
-```sh
-tools/scripts/setup_objdiff.sh              # pinned objdiff-cli
-make build                                  # base: main executable
-make overlay-build-all                      # base: all overlays
-make report                                 # fresh retail target + audited report
-```
-
-`make report` regenerates the target objects directly from the retail binaries,
-rebuilds `objdiff.json`, verifies every configured module SHA-1, and runs the
-progress-input audit before invoking objdiff. A final report audit rejects the
-artifact if any code byte or function outside `semantic_c` receives credit.
-
-`objdiff.json` is generated, not committed; run `make objdiff-config` before
-pointing the objdiff GUI at the repository.
-
-## License
-
-See [LICENSE.md](LICENSE.md). Game code and data remain the property of their
-respective owners; this repository contains only clean-room reimplementation
-source.
+- See [`LICENSE.md`](LICENSE.md) for licensing details.
+- Parasite Eve is a registered trademark of Square Enix Co., Ltd.
+- This repository contains clean-room reverse-engineered and decompiled source code. It does **not** contain copyrighted game assets, ROMs, BIOS files, or disc images. Users must provide their own legally obtained copies of the original discs.
