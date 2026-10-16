@@ -35,6 +35,7 @@ extern "C" {
 int  PspHost_Init(void);
 void PspHost_Shutdown(void);
 int  PspHost_IsRunning(void);
+void psx_main(void);
 
 /* Timing helpers */
 uint32_t PspHost_GetTicks(void);

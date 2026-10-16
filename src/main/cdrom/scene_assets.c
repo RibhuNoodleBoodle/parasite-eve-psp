@@ -1,3 +1,4 @@
+#define PE1_NO_INLINE_CDROM_POLL 1
 #include "common.h"
 #include "pe1/akao.h"
 #include "pe1/akao/commands.h"

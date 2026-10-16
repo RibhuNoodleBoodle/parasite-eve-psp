@@ -93,7 +93,11 @@ extern DslFILE g_MenuCardVideoFile, g_MenuCardScreenVideoFile;
 extern CdlLOC g_MenuCardVideoRestartLoc, g_MenuCardScreenVideoRestartLoc;
 extern VideoDisplay g_MenuCardVideoDisplay, g_MenuCardScreenVideoDisplay;
 extern char g_MenuCardVideoDirectory[], g_MenuCardVideoDirectoryLate[], g_MenuCardScreenVideoDirectory[], g_MenuCardScreenVideoDirectoryLate[];
+#if defined(__psp__) || defined(ENABLE_PSP)
+extern void StSetRing(void *, s32);
+#else
 extern void strcat(char *, char *), StSetRing(void *, s32);
+#endif
 extern void DecDCTvlc2(void *, void *, void *), MenuCardFirst_UploadVideoSlice(void);
 extern s32 DsRead2(CdlLOC *, s32);
 s32 MenuCardFirst_OpenVideo(s32 number);

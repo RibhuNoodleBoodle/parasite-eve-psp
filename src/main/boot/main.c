@@ -11,8 +11,18 @@
 
 #define STATE_FLAG_IMAGE_BUSY 0x00100000U
 #define STATE_FLAG_READY 0x00000100U
+#if defined(__psp__) || defined(ENABLE_PSP)
+Pe1GameState g_GameState;
+unsigned int g_GameStateFlags;
+u32 g_GameStateFlagsWord;
+u32 g_SceneDispatchToken;
+u32 g_SceneDispatchCur;
+u32 g_PlayTimeFrameCounter;
 
+void psx_main(void) {
+#else
 void main(void) {
+#endif
     int mode;
     u32 token;
     Pe1GameState *state;
