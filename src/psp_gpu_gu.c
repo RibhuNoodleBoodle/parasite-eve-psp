@@ -69,8 +69,8 @@ static inline void TransformCoords(int16_t x, int16_t y, int16_t *out_x, int16_t
         break;
 
     case PSP_SCALE_4_3_PILLARBOX:
-        /* 4:3 Aspect ratio scaled: height = 272, width = 362, offset_x = (480-362)/2 = 59 */
-        *out_x = (int16_t)(((world_x * 362) / 320) + 59);
+        /* 4:3 Aspect ratio scaled: height = 272, width = 364, offset_x = (480-364)/2 = 58 */
+        *out_x = (int16_t)(58 + ((world_x * 364) / 320));
         *out_y = (int16_t)((world_y * 272) / 240);
         break;
 

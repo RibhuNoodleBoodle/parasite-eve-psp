@@ -122,17 +122,19 @@ typedef enum PspFilterMode {
  * PSP Hardware Vertex Formats
  * ------------------------------------------------------------------------------
  */
-/* Untextured 2D vertex: Color ABGR8888 + X, Y, Z */
-typedef struct __attribute__((packed)) PspVertexColor2D {
+/* Untextured 2D vertex: Color ABGR8888 + X, Y, Z + Pad (12 bytes, 4-byte aligned) */
+typedef struct PspVertexColor2D {
     uint32_t color;
     int16_t x, y, z;
+    int16_t pad;
 } PspVertexColor2D;
 
-/* Textured 2D vertex: U, V + Color ABGR8888 + X, Y, Z */
-typedef struct __attribute__((packed)) PspVertexTex2D {
+/* Textured 2D vertex: U, V + Color ABGR8888 + X, Y, Z + Pad (16 bytes, 4-byte aligned) */
+typedef struct PspVertexTex2D {
     uint16_t u, v;
     uint32_t color;
     int16_t x, y, z;
+    int16_t pad;
 } PspVertexTex2D;
 
 /* ------------------------------------------------------------------------------
