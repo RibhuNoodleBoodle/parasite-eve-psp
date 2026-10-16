@@ -75,10 +75,15 @@ static inline uint32_t PsxModulateColorToPsp(uint8_t r, uint8_t g, uint8_t b, ui
            (uint32_t)PsxScaleColor(r);
 }
 
-/* Transform PS1 native 320x240 coordinates to PSP 480x272 screen space */
+/* Transform PS1 native coordinates to PSP 480x272 screen space */
 static inline void TransformCoords(int16_t x, int16_t y, int16_t *out_x, int16_t *out_y) {
     int32_t world_x = (int32_t)x + (int32_t)g_psp_gpu.offset_x;
     int32_t world_y = (int32_t)y + (int32_t)g_psp_gpu.offset_y;
+
+    int32_t ps1_disp_w = (g_psp_gpu.has_dispenv && g_psp_gpu.current_dispenv.disp.w > 0) ?
+                         (int32_t)g_psp_gpu.current_dispenv.disp.w : 320;
+    int32_t ps1_disp_h = (g_psp_gpu.has_dispenv && g_psp_gpu.current_dispenv.disp.h > 0) ?
+                         (int32_t)g_psp_gpu.current_dispenv.disp.h : 240;
 
     switch (g_psp_gpu.scaling_mode) {
     case PSP_SCALE_ORIGINAL_CENTER:
@@ -87,17 +92,17 @@ static inline void TransformCoords(int16_t x, int16_t y, int16_t *out_x, int16_t
         *out_y = (int16_t)(world_y + 16);
         break;
 
-    case PSP_SCALE_4_3_PILLARBOX:
-        /* 4:3 Aspect ratio scaled: height = 272, width = 364, offset_x = (480-364)/2 = 58 */
-        *out_x = (int16_t)(58 + ((world_x * 364) / 320));
-        *out_y = (int16_t)((world_y * 272) / 240);
+    case PSP_SCALE_16_9_FULL:
+        /* Full widescreen stretch: ps1_disp_w -> 480, ps1_disp_h -> 272 */
+        *out_x = (int16_t)((world_x * 480) / ps1_disp_w);
+        *out_y = (int16_t)((world_y * 272) / ps1_disp_h);
         break;
 
-    case PSP_SCALE_16_9_FULL:
+    case PSP_SCALE_4_3_PILLARBOX:
     default:
-        /* Full widescreen stretch: 320 -> 480, 240 -> 272 */
-        *out_x = (int16_t)((world_x * 480) / 320);
-        *out_y = (int16_t)((world_y * 272) / 240);
+        /* 4:3 Aspect ratio centered: VIEWPORT_X=59, VIEWPORT_Y=0, VIEWPORT_W=362, VIEWPORT_H=272 */
+        *out_x = (int16_t)(59 + ((world_x * 362) / ps1_disp_w));
+        *out_y = (int16_t)((world_y * 272) / ps1_disp_h);
         break;
     }
 }
@@ -267,6 +272,10 @@ void PspGpu_Init(void) {
     g_psp_gpu.filter_mode  = PSP_FILTER_BILINEAR;
     g_psp_gpu.clip_x2      = PS1_NATIVE_WIDTH;
     g_psp_gpu.clip_y2      = PS1_NATIVE_HEIGHT;
+    g_psp_gpu.has_dispenv  = 1;
+    g_psp_gpu.current_dispenv.disp.w = 320;
+    g_psp_gpu.current_dispenv.disp.h = 240;
+    g_psp_gpu.current_dispenv.isrgb24 = 0;
 
     /* Initialize PSP Graphics Engine (libgu) */
     sceGuInit();
@@ -369,13 +378,20 @@ void PspGpu_BeginFrame(void) {
 
     sceGuStart(GU_DIRECT, g_display_list);
 
-    /* Scissor to active display bounds */
+    /* Scissor covering full 480x272 panel to clear to black */
     sceGuScissor(0, 0, PSP_SCREEN_WIDTH, PSP_SCREEN_HEIGHT);
     sceGuEnable(GU_SCISSOR_TEST);
 
     /* Clear framebuffer to black */
     sceGuClearColor(0xFF000000);
     sceGuClear(GU_COLOR_BUFFER_BIT);
+
+    /* Set scissor strictly to 4:3 viewport: (59, 0, 362, 272) */
+    if (g_psp_gpu.scaling_mode == PSP_SCALE_4_3_PILLARBOX) {
+        sceGuScissor(59, 0, 362, 272);
+    } else {
+        sceGuScissor(0, 0, PSP_SCREEN_WIDTH, PSP_SCREEN_HEIGHT);
+    }
 
     g_psp_gpu.in_frame = 1;
 }
@@ -530,6 +546,10 @@ DRAWENV *PspGpu_PutDrawEnv(const DRAWENV *env) {
 }
 
 DISPENV *PspGpu_PutDispEnv(const DISPENV *env) {
+    if (env) {
+        g_psp_gpu.current_dispenv = *env;
+        g_psp_gpu.has_dispenv = 1;
+    }
     return (DISPENV *)env;
 }
 
@@ -1233,10 +1253,98 @@ void PspGpu_ExecutePacket(const uint32_t *packet) {
     }
 }
 
+/* ------------------------------------------------------------------------------
+ * DISPENV Shadow VRAM Base Quad Presentation
+ * Supports 16-bit direct color (isrgb24=0) and 24-bit RGB (isrgb24=1)
+ * ------------------------------------------------------------------------------
+ */
+void psp_render_vram_dispenv(void) {
+    int disp_x = g_psp_gpu.current_dispenv.disp.x;
+    int disp_y = g_psp_gpu.current_dispenv.disp.y;
+    int disp_w = g_psp_gpu.current_dispenv.disp.w;
+    int disp_h = g_psp_gpu.current_dispenv.disp.h;
+    int isrgb24 = g_psp_gpu.current_dispenv.isrgb24;
+
+    if (disp_w <= 0) disp_w = 320;
+    if (disp_h <= 0) disp_h = 240;
+    if (disp_w > 512) disp_w = 512;
+    if (disp_h > 512) disp_h = 512;
+
+    /* Decode active VRAM framebuffer into 512x512 texture buffer */
+    if (!isrgb24) {
+        /* 16-bit 15bpp direct color mode */
+        for (int r = 0; r < disp_h; r++) {
+            int src_y = (disp_y + r) & 0x1FF;
+            const uint16_t *src_row = &g_ps1_vram[src_y * PS1_VRAM_WIDTH];
+            uint16_t *dst_row = &s_decoded_tpage[r * 512];
+            for (int c = 0; c < disp_w; c++) {
+                int src_x = (disp_x + c) & 0x3FF;
+                uint16_t pix = src_row[src_x];
+                if (pix != 0) pix |= 0x8000;
+                dst_row[c] = pix;
+            }
+        }
+    } else {
+        /* 24-bit RGB mode (3 bytes per pixel packed in VRAM) */
+        for (int r = 0; r < disp_h; r++) {
+            int src_y = (disp_y + r) & 0x1FF;
+            const uint8_t *src_bytes = (const uint8_t *)&g_ps1_vram[src_y * PS1_VRAM_WIDTH];
+            uint16_t *dst_row = &s_decoded_tpage[r * 512];
+            for (int c = 0; c < disp_w; c++) {
+                int byte_idx = (disp_x * 2) + (c * 3);
+                uint8_t red   = src_bytes[byte_idx + 0];
+                uint8_t green = src_bytes[byte_idx + 1];
+                uint8_t blue  = src_bytes[byte_idx + 2];
+                uint16_t pix = (uint16_t)(((blue >> 3) << 10) | ((green >> 3) << 5) | (red >> 3));
+                if (pix != 0) pix |= 0x8000;
+                dst_row[c] = pix;
+            }
+        }
+    }
+
+    /* Invalidate decoded tpage cache tags */
+    s_cached_tpage = 0xFFFF;
+    s_cached_clut  = 0xFFFF;
+
+    /* Writeback decoded texture to RAM for GE */
+    sceKernelDcacheWritebackInvalidateRange(s_decoded_tpage, sizeof(s_decoded_tpage));
+
+    /* Setup texturing for base quad */
+    sceGuTexMode(GU_PSM_5551, 0, 0, 0);
+    sceGuTexImage(0, 512, 512, 512, s_decoded_tpage);
+    sceGuTexFunc(GU_TFX_REPLACE, GU_TCC_RGBA);
+    sceGuTexFilter(GU_LINEAR, GU_LINEAR);
+    sceGuEnable(GU_TEXTURE_2D);
+    sceGuDisable(GU_BLEND);
+
+    /* Render base quad stretched to 4:3 viewport: (59, 0) to (59 + 362, 272) */
+    PspVertexTex2D *v = (PspVertexTex2D *)sceGuGetMemory(2 * sizeof(PspVertexTex2D));
+    if (v) {
+        v[0].u = 0;
+        v[0].v = 0;
+        v[0].color = 0xFFFFFFFF;
+        v[0].x = 59;
+        v[0].y = 0;
+        v[0].z = 0;
+
+        v[1].u = (uint16_t)disp_w;
+        v[1].v = (uint16_t)disp_h;
+        v[1].color = 0xFFFFFFFF;
+        v[1].x = 59 + 362;
+        v[1].y = 272;
+        v[1].z = 0;
+
+        sceGuDrawArray(GU_SPRITES, GU_TEXTURE_16BIT | GU_COLOR_8888 | GU_VERTEX_16BIT | GU_TRANSFORM_2D, 2, NULL, v);
+    }
+}
+
 void PspGpu_DrawOTag(const uint32_t *ot, int count) {
     if (!ot || count <= 0) return;
 
     PspGpu_BeginFrame();
+
+    /* Render authentic DISPENV shadow VRAM base quad */
+    psp_render_vram_dispenv();
 
     /* Back-to-front rendering: traverse Ordering Table entries from count-1 down to 0 */
     for (int i = count - 1; i >= 0; i--) {
@@ -1275,7 +1383,11 @@ int DrawSync(int mode) {
 
 int VSync(int mode) {
     (void)mode;
-    if (g_psp_gpu.in_frame) {
+    if (!g_psp_gpu.in_frame) {
+        PspGpu_BeginFrame();
+        psp_render_vram_dispenv();
+        PspGpu_EndFrame();
+    } else {
         sceKernelDcacheWritebackInvalidateAll();
         sceGuFinish();
         sceGuSync(0, 0);

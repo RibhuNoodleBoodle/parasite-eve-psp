@@ -175,10 +175,16 @@ typedef struct PspGpuState {
     PspFilterMode filter_mode;
     int display_mask;          /* 0 = display active, 1 = blanked */
 
+    /* Current PS1 display environment state */
+    int has_dispenv;
+    DISPENV current_dispenv;
+
     /* Profiling & statistics */
     uint32_t primitives_drawn;
     uint32_t textures_uploaded;
 } PspGpuState;
+
+void psp_render_vram_dispenv(void);
 
 extern PspGpuState g_psp_gpu;
 

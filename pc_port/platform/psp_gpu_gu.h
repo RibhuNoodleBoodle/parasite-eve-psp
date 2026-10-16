@@ -122,17 +122,19 @@ typedef enum PspFilterMode {
  * PSP Hardware Vertex Formats
  * ------------------------------------------------------------------------------
  */
-/* Untextured 2D vertex: Color ABGR8888 + X, Y, Z */
-typedef struct __attribute__((packed)) PspVertexColor2D {
+/* Untextured 2D vertex: Color ABGR8888 + X, Y, Z + Pad (12 bytes, 4-byte aligned) */
+typedef struct PspVertexColor2D {
     uint32_t color;
     int16_t x, y, z;
+    int16_t pad;
 } PspVertexColor2D;
 
-/* Textured 2D vertex: U, V + Color ABGR8888 + X, Y, Z */
-typedef struct __attribute__((packed)) PspVertexTex2D {
+/* Textured 2D vertex: U, V + Color ABGR8888 + X, Y, Z + Pad (16 bytes, 4-byte aligned) */
+typedef struct PspVertexTex2D {
     uint16_t u, v;
     uint32_t color;
     int16_t x, y, z;
+    int16_t pad;
 } PspVertexTex2D;
 
 /* ------------------------------------------------------------------------------
@@ -173,10 +175,16 @@ typedef struct PspGpuState {
     PspFilterMode filter_mode;
     int display_mask;          /* 0 = display active, 1 = blanked */
 
+    /* Current PS1 display environment state */
+    int has_dispenv;
+    DISPENV current_dispenv;
+
     /* Profiling & statistics */
     uint32_t primitives_drawn;
     uint32_t textures_uploaded;
 } PspGpuState;
+
+void psp_render_vram_dispenv(void);
 
 extern PspGpuState g_psp_gpu;
 
@@ -222,6 +230,20 @@ DISPENV *PspGpu_SetDefDispEnv(DISPENV *env, int x, int y, int w, int h);
 /* Direct VRAM Access */
 uint16_t *PspGpu_GetVramPointer(void);
 void PspGpu_InvalidateVramRange(uint32_t x, uint32_t y, uint32_t w, uint32_t h);
+
+/* PS1 Psy-Q Standard API Declarations */
+int  DrawSync(int mode);
+int  VSync(int mode);
+int  ResetGraph(int mode);
+int  SetDispMask(int mask);
+int  LoadImage(const RECT *rect, const void *pixels);
+int  StoreImage(const RECT *rect, void *pixels);
+int  MoveImage(const RECT *src, int dst_x, int dst_y);
+void ClearImage(const RECT *rect, uint8_t r, uint8_t g, uint8_t b);
+DRAWENV *PutDrawEnv(const DRAWENV *env);
+DISPENV *PutDispEnv(const DISPENV *env);
+void DrawOTag(const uint32_t *ot);
+void DrawPrim(const void *p);
 
 #ifdef __cplusplus
 }
