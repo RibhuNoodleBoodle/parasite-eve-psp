@@ -1,66 +1,74 @@
 #!/usr/bin/env bash
 # ==============================================================================
-# debug_ppsspp.sh - Automated PPSSPP Portable Runner & Telemetry Analyzer
+# debug_ppsspp.sh - Automated PPSSPP Emulator Runner & Telemetry Analyzer
 # ==============================================================================
 set -euo pipefail
 
 ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-PPSSPP_DIR="$ROOT_DIR/.ppsspp"
-PPSSPP_BIN="$PPSSPP_DIR/PPSSPP.AppImage"
-EXTRACTED_BIN="$PPSSPP_DIR/AppDir/AppRun"
-LOG_FILE="$PPSSPP_DIR/ppsspp_debug.log"
-CONFIG_FILE="$PPSSPP_DIR/ppsspp_debug.ini"
+LOG_FILE="$ROOT_DIR/ppsspp_debug.log"
+CONFIG_FILE="$ROOT_DIR/ppsspp_debug.ini"
 EBOOT_PATH="$ROOT_DIR/dist/PSP/GAME/ParasiteEve/EBOOT.PBP"
-TIMEOUT_SECS=10
+TIMEOUT_SECS=8
 
-mkdir -p "$PPSSPP_DIR"
-
-echo "=== [Step 1] Verifying Portable PPSSPP Binary ==="
-if [[ ! -f "$PPSSPP_BIN" && ! -f "$EXTRACTED_BIN" ]]; then
-    echo "Downloading portable PPSSPP AppImage..."
-    APPIMAGE_URL="https://github.com/hrydgard/ppsspp/releases/download/v1.20.4/PPSSPP-v1.20.4-anylinux-x86_64.AppImage"
-    curl -fsSL -o "$PPSSPP_BIN" "$APPIMAGE_URL"
-    chmod +x "$PPSSPP_BIN"
-fi
-
-RUNNER_BIN=""
-if [[ -f "$PPSSPP_BIN" ]]; then
-    chmod +x "$PPSSPP_BIN" 2>/dev/null || true
-    # Test if AppImage runs directly (FUSE available)
-    if "$PPSSPP_BIN" --version >/dev/null 2>&1; then
-        RUNNER_BIN="$PPSSPP_BIN"
-    else
-        echo "FUSE not available or direct execution failed; checking extracted AppDir..."
-        if [[ ! -f "$EXTRACTED_BIN" ]]; then
-            echo "Extracting AppImage into $PPSSPP_DIR/AppDir..."
-            (cd "$PPSSPP_DIR" && "$PPSSPP_BIN" --appimage-extract >/dev/null 2>&1 || true)
-            if [[ -d "$PPSSPP_DIR/squashfs-root" ]]; then
-                rm -rf "$PPSSPP_DIR/AppDir"
-                mv "$PPSSPP_DIR/squashfs-root" "$PPSSPP_DIR/AppDir"
-            fi
-        fi
-        if [[ -f "$EXTRACTED_BIN" ]]; then
-            RUNNER_BIN="$EXTRACTED_BIN"
-        fi
-    fi
-elif [[ -f "$EXTRACTED_BIN" ]]; then
-    RUNNER_BIN="$EXTRACTED_BIN"
-fi
-
-if [[ -z "$RUNNER_BIN" ]]; then
-    echo "ERROR: Unable to find or execute PPSSPP binary!" >&2
+echo "=== [Step 1] Verifying ppsspp-emulator Binary ==="
+PPSSPP_BIN="$(which ppsspp-emulator 2>/dev/null || true)"
+if [[ -z "$PPSSPP_BIN" ]]; then
+    echo "ERROR: ppsspp-emulator not found on system PATH!" >&2
     exit 1
 fi
 
-echo "PPSSPP Binary: $RUNNER_BIN"
-"$RUNNER_BIN" --version
+echo "ppsspp-emulator detected at: $PPSSPP_BIN"
+"$PPSSPP_BIN" --version || true
 
 echo ""
-echo "=== [Step 2] Configuring Portable Telemetry & MemStick ==="
+echo "=== [Step 2] Configuring Telemetry & Environment ==="
 if [[ ! -f "$EBOOT_PATH" ]]; then
-    echo "ERROR: Target EBOOT not found at $EBOOT_PATH" >&2
-    echo "Please build the release first using Makefile.psp or build_psp_release.sh" >&2
-    exit 1
+    echo "Target EBOOT not found at $EBOOT_PATH. Building via Makefile.psp..."
+    make -f Makefile.psp
+fi
+
+# Ensure dist/ has disc files
+mkdir -p "$ROOT_DIR/dist/PSP/GAME/ParasiteEve/disc"
+if [[ -f "$ROOT_DIR/disc/PE_DISC1.bin" ]]; then
+    ln -sf "$ROOT_DIR/disc/PE_DISC1.bin" "$ROOT_DIR/dist/PSP/GAME/ParasiteEve/disc/PE_DISC1.bin" 2>/dev/null || true
+    ln -sf "$ROOT_DIR/disc/PE_DISC1.bin" "$ROOT_DIR/dist/PSP/GAME/ParasiteEve/disc/PE_DISC1.BIN" 2>/dev/null || true
+fi
+if [[ -f "$ROOT_DIR/disc/PE_DISC2.BIN" ]]; then
+    ln -sf "$ROOT_DIR/disc/PE_DISC2.BIN" "$ROOT_DIR/dist/PSP/GAME/ParasiteEve/disc/PE_DISC2.BIN" 2>/dev/null || true
+    ln -sf "$ROOT_DIR/disc/PE_DISC2.BIN" "$ROOT_DIR/dist/PSP/GAME/ParasiteEve/disc/PE_DISC2.bin" 2>/dev/null || true
+elif [[ -f "$ROOT_DIR/disc/PE_DISC2.bin" ]]; then
+    ln -sf "$ROOT_DIR/disc/PE_DISC2.bin" "$ROOT_DIR/dist/PSP/GAME/ParasiteEve/disc/PE_DISC2.bin" 2>/dev/null || true
+    ln -sf "$ROOT_DIR/disc/PE_DISC2.bin" "$ROOT_DIR/dist/PSP/GAME/ParasiteEve/disc/PE_DISC2.BIN" 2>/dev/null || true
+fi
+
+# Synchronize with Snap PPSSPP base directory if present
+SNAP_PPSSPP_DIR="/home/ribhu/snap/ppsspp-emulator/25/.config/ppsspp/PSP/GAME/ParasiteEve"
+if [[ -d "/home/ribhu/snap/ppsspp-emulator/25/.config/ppsspp" ]]; then
+    mkdir -p "$SNAP_PPSSPP_DIR/disc"
+    cp -f "$EBOOT_PATH" "$SNAP_PPSSPP_DIR/EBOOT.PBP" 2>/dev/null || true
+    if [[ -f "$ROOT_DIR/disc/PE_DISC1.bin" ]]; then
+        ln -sf "$ROOT_DIR/disc/PE_DISC1.bin" "$SNAP_PPSSPP_DIR/disc/PE_DISC1.bin" 2>/dev/null || true
+        ln -sf "$ROOT_DIR/disc/PE_DISC1.bin" "$SNAP_PPSSPP_DIR/disc/PE_DISC1.BIN" 2>/dev/null || true
+    fi
+    if [[ -f "$ROOT_DIR/disc/PE_DISC2.BIN" ]]; then
+        ln -sf "$ROOT_DIR/disc/PE_DISC2.BIN" "$SNAP_PPSSPP_DIR/disc/PE_DISC2.BIN" 2>/dev/null || true
+        ln -sf "$ROOT_DIR/disc/PE_DISC2.BIN" "$SNAP_PPSSPP_DIR/disc/PE_DISC2.bin" 2>/dev/null || true
+    fi
+fi
+
+# Also synchronize with ~/.config/ppsspp if present
+USER_PPSSPP_DIR="$HOME/.config/ppsspp/PSP/GAME/ParasiteEve"
+if [[ -d "$HOME/.config/ppsspp" ]]; then
+    mkdir -p "$USER_PPSSPP_DIR/disc"
+    cp -f "$EBOOT_PATH" "$USER_PPSSPP_DIR/EBOOT.PBP" 2>/dev/null || true
+    if [[ -f "$ROOT_DIR/disc/PE_DISC1.bin" ]]; then
+        ln -sf "$ROOT_DIR/disc/PE_DISC1.bin" "$USER_PPSSPP_DIR/disc/PE_DISC1.bin" 2>/dev/null || true
+        ln -sf "$ROOT_DIR/disc/PE_DISC1.bin" "$USER_PPSSPP_DIR/disc/PE_DISC1.BIN" 2>/dev/null || true
+    fi
+    if [[ -f "$ROOT_DIR/disc/PE_DISC2.BIN" ]]; then
+        ln -sf "$ROOT_DIR/disc/PE_DISC2.BIN" "$USER_PPSSPP_DIR/disc/PE_DISC2.BIN" 2>/dev/null || true
+        ln -sf "$ROOT_DIR/disc/PE_DISC2.BIN" "$USER_PPSSPP_DIR/disc/PE_DISC2.bin" 2>/dev/null || true
+    fi
 fi
 
 cat << EOF > "$CONFIG_FILE"
@@ -82,23 +90,15 @@ IOLevel = 6
 FramebufLevel = 6
 EOF
 
-if [[ -d "/home/ribhu/.config/ppsspp/PSP/GAME/ParasiteEve" ]]; then
-    cp -f "$EBOOT_PATH" "/home/ribhu/.config/ppsspp/PSP/GAME/ParasiteEve/EBOOT.PBP" 2>/dev/null || true
-    mkdir -p "/home/ribhu/.config/ppsspp/PSP/GAME/ParasiteEve/disc"
-    ln -sf "$ROOT_DIR/dist/PSP/GAME/ParasiteEve/disc/PE_DISC1.bin" "/home/ribhu/.config/ppsspp/PSP/GAME/ParasiteEve/disc/PE_DISC1.bin" 2>/dev/null || true
-    ln -sf "$ROOT_DIR/dist/PSP/GAME/ParasiteEve/disc/PE_DISC2.bin" "/home/ribhu/.config/ppsspp/PSP/GAME/ParasiteEve/disc/PE_DISC2.bin" 2>/dev/null || true
-fi
-
-echo "MemStick Directory configured to: $ROOT_DIR/dist"
 echo "Target EBOOT: $EBOOT_PATH"
 echo "Logging output to: $LOG_FILE"
 
 echo ""
-echo "=== [Step 3] Running PPSSPP Telemetry ($TIMEOUT_SECS seconds) ==="
+echo "=== [Step 3] Running ppsspp-emulator ($TIMEOUT_SECS seconds) ==="
 rm -f "$LOG_FILE"
 
-# Launch PPSSPP with verbose logging
-"$RUNNER_BIN" --appendconfig="$CONFIG_FILE" -v --log="$LOG_FILE" "$EBOOT_PATH" &
+# Launch ppsspp-emulator with verbose logging
+"$PPSSPP_BIN" --appendconfig="$CONFIG_FILE" -v --log="$LOG_FILE" "$EBOOT_PATH" &
 PPSSPP_PID=$!
 
 sleep "$TIMEOUT_SECS" || true
@@ -127,19 +127,11 @@ grep -E "Module ParasiteEve|Booted|entry=|Allocated" "$LOG_FILE" | head -n 10 ||
 
 echo ""
 echo "--- PSP Subsystem Console Output ---"
-grep -E "\[PSP_HOST\]|\[PSP_INPUT\]|\[PSP_AUDIO\]|\[PSP_CDROM\]|\[PSP_GPU\]" "$LOG_FILE" | head -n 40 || true
+grep -E "\[PSP_HOST\]|\[PSP_INPUT\]|\[PSP_AUDIO\]|\[PSP_CDROM\]|\[PSP_GPU\]|\[PSP_TITLE\]" "$LOG_FILE" | head -n 40 || true
 
 echo ""
-echo "--- Unimplemented Syscalls & HLE Warnings ---"
-grep -iE "unimplemented|unknown syscall|unknown HLE" "$LOG_FILE" | head -n 10 || echo "None found."
-
-echo ""
-echo "--- File I/O & Loader Errors ---"
-grep -iE "ERRNO_FILE_NOT_FOUND|E\[FILESYS\]|E\[LOADER\]|Failed to load" "$LOG_FILE" | head -n 10 || echo "None found."
-
-echo ""
-echo "--- MIPS Exceptions & Crash Indicators ---"
-grep -iE "MIPS Exception|invalid opcode|SIGSEGV|Fatal crash" "$LOG_FILE" | head -n 10 || echo "No MIPS crashes detected."
+echo "--- File I/O & Loader Status ---"
+grep -iE "Opened PE_DISC|FATAL|ERRNO_FILE_NOT_FOUND|E\[FILESYS\]|E\[LOADER\]" "$LOG_FILE" | head -n 15 || echo "No file errors."
 
 echo ""
 echo "--- Framebuffer & GE Display List Status ---"

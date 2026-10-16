@@ -25,6 +25,11 @@ __pycache__/
 *.a
 *.elf
 *.s
+ppsspp_*.log
+ppsspp_*.ini
+ppsspp_debug.log
+ppsspp_debug.ini
+ppsspp_test.log
 
 # local reverse-engineering scratch/output
 .cache/
