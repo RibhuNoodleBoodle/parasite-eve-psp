@@ -221,3 +221,6 @@ SAVEDATA/
 *.img
 *.IMG
 !disc/disc1.xml
+
+# Portable PPSSPP test runner and emulator directory
+.ppsspp/
