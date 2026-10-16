@@ -44,12 +44,6 @@ static uint16_t s_cached_tpage = 0xFFFF;
 static uint16_t s_cached_clut  = 0xFFFF;
 static uint32_t s_cached_textures_uploaded = 0xFFFFFFFF;
 
-/* Last SPRT primitive tracking for EDRAM readback verification */
-static int16_t  s_last_sprt_x0 = 0, s_last_sprt_y0 = 0;
-static int16_t  s_last_sprt_x1 = 0, s_last_sprt_y1 = 0;
-static uint16_t s_last_sprt_u  = 0, s_last_sprt_v  = 0;
-static int16_t  s_last_sprt_w  = 0, s_last_sprt_h  = 0;
-static uint32_t s_last_sprt_frame = 0xFFFFFFFFu;
 
 /* Temporary vertex storage fallback for batch drawing */
 #define MAX_TEMP_VERTS 256
@@ -1100,12 +1094,6 @@ void PspGpu_ExecuteSinglePrim(const uint32_t *packet) {
         ApplySemiTransparency(is_semi_trans, abr_mode);
         ApplyTexture(g_psp_gpu.current_tpage, clut, is_raw_tex);
 
-        s_last_sprt_x0 = x0; s_last_sprt_y0 = y0;
-        s_last_sprt_x1 = x1; s_last_sprt_y1 = y1;
-        s_last_sprt_u  = u;  s_last_sprt_v  = v;
-        s_last_sprt_w  = w;  s_last_sprt_h  = h;
-        s_last_sprt_frame = g_psp_gpu.frame_counter;
-
         PspVertexTex2D *vert = (PspVertexTex2D *)sceGuGetMemory(2 * sizeof(PspVertexTex2D));
         if (!vert) vert = g_temp_tex_verts;
         vert[0].u = u;     vert[0].v = v;
@@ -1530,17 +1518,6 @@ int VSync(int mode) {
                             out_pix = (uint16_t)(((b >> 3) << 10) | ((g >> 3) << 5) | (r >> 3) | 0x8000u);
                         } else {
                             out_pix = s_dispenv_tex[src_y * 512 + src_x];
-                        }
-                        if (s_last_sprt_frame + 1 >= g_psp_gpu.frame_counter &&
-                            x >= s_last_sprt_x0 && x < s_last_sprt_x1 &&
-                            y >= s_last_sprt_y0 && y < s_last_sprt_y1 &&
-                            s_last_sprt_x1 > s_last_sprt_x0 && s_last_sprt_y1 > s_last_sprt_y0) {
-                            int u = s_last_sprt_u + ((x - s_last_sprt_x0) * s_last_sprt_w) / (s_last_sprt_x1 - s_last_sprt_x0);
-                            int v = s_last_sprt_v + ((y - s_last_sprt_y0) * s_last_sprt_h) / (s_last_sprt_y1 - s_last_sprt_y0);
-                            uint16_t spr_pix = s_decoded_tpage[(v & 0x1FF) * 512 + (u & 0x1FF)];
-                            if ((spr_pix & 0x7FFFu) != 0) {
-                                out_pix = spr_pix;
-                            }
                         }
                     }
                     edram_disp[y * PSP_BUFFER_STRIDE + x] = out_pix;

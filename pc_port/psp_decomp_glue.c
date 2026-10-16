@@ -306,36 +306,6 @@ void Boot_RunFrame(void) {
             fprintf(stderr, "[NEW-GAME-TRACE] Activating Carnegie Hall stage overlay room_m005_theater\n");
             PspOverlay_Activate("room_m005_theater");
 
-            /* Load Map 5 theater room TIMs from PE.IMG:
-             * Sector 604: Authentic Carnegie Hall room 5 theater TIM (17 sectors)
-             * Sector 180: UI & Font TIM (17 sectors)
-             * Sector 197: HUD TIM (4 sectors) */
-            static uint8_t s_stage_scratch[34 * 2048];
-            if (PspCdrom_ReadDiscSectors(g_PeImageBaseLba + 604, 0, s_stage_scratch, 17) == 0) {
-                Asset_LoadTimImage((TimFile *)s_stage_scratch);
-
-                /* Unpack 4-bit theater background to display buffer (0, 0..240) */
-                const uint16_t *clut = &g_ps1_vram[252 * PS1_VRAM_WIDTH + 336];
-                for (int y = 0; y < 240; y++) {
-                    const uint8_t *src_row = (const uint8_t *)&g_ps1_vram[y * PS1_VRAM_WIDTH + 384];
-                    uint16_t *dst_row = &g_ps1_vram[y * PS1_VRAM_WIDTH];
-                    for (int x = 0; x < 256; x++) {
-                        uint8_t byte = src_row[x / 2];
-                        uint8_t pal = (x % 2 == 0) ? (byte & 0x0F) : (byte >> 4);
-                        uint16_t c = clut[pal];
-                        if (c != 0) c |= 0x8000;
-                        dst_row[x + 32] = c;
-                    }
-                }
-            }
-            if (PspCdrom_ReadDiscSectors(g_PeImageBaseLba + 180, 0, s_stage_scratch, 17) == 0) {
-                Asset_LoadTimImage((TimFile *)s_stage_scratch);
-            }
-            if (PspCdrom_ReadDiscSectors(g_PeImageBaseLba + 197, 0, s_stage_scratch, 4) == 0) {
-                Asset_LoadTimImage((TimFile *)s_stage_scratch);
-            }
-            fprintf(stderr, "[NEW-GAME-TRACE] Carnegie Hall Map 5 TIMs loaded into shadow VRAM\n");
-
             /* Set up 16-bit 4:3 centered DISPENV for Carnegie Hall gameplay */
             DISPENV stage_env;
             SetDefDispEnv(&stage_env, 0, 0, 320, 240);
