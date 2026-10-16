@@ -91,6 +91,9 @@ void main(void) {
                 g_GameState.flags |= 3;
                 break;
             default:
+#if defined(__psp__) || defined(ENABLE_PSP)
+                fprintf(stderr, "[NEW-GAME-TRACE] Dispatching token 0x%08X to Boot_RunFrame()\n", (unsigned int)token);
+#endif
                 Boot_RunFrame();
                 break;
             }

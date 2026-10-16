@@ -28,10 +28,14 @@
 #include "pe1/render_matrix_slot.h"
 #include "pe1/scene_assets.h"
 #include "pe1/game_audio_state.h"
+#include "pe1/geom_state.h"
+#include "pe1/render_tint.h"
 
 #include "psp_gpu_gu.h"
 #include "psp_cdrom_iso.h"
 #include "psp_sdl_input.h"
+#include "psp_overlay_mgr.h"
+#include "pe1/scene_room.h"
 
 /* Akao audio state storage */
 AkaoVoiceBankEntry g_AkaoVoiceBankEntries[32];
@@ -48,22 +52,29 @@ unsigned int g_PeImageBaseLba = 1013;
 signed char  g_PeImageMountFlags = 1;
 
 u16 g_PeImageSectorTable[128] = {
-    0, 71, 100, 150, 200, 250, 300, 350, 400, 450, 500, 550, 600, 650, 700, 750,
-    800, 850, 900, 950, 965, 987, 1000, 1050, 1100, 1150, 1200, 1250, 1300, 1350
+    0, 71, 72, 87, 121, 126, 131, 153, 156, 157, 180, 197, 200, 203, 220, 237,
+    254, 271, 288, 316, 340, 368, 396, 428, 434, 442, 448, 456, 464, 472, 478, 483,
+    489, 497, 503, 510, 519, 526, 532, 537, 539, 541, 544, 547, 550, 553, 570, 587,
+    604, 621, 638, 655, 672, 689, 706, 723, 740, 757, 774, 791, 808, 825, 842, 859,
+    876, 893, 910, 927
 };
 u16 g_PeImageSectorBoundsNext[128];
 
-u16 g_StrFileDirLba[2] = {0, 2};
-static u8 s_str_file_dir_storage[4096];
-u8 *g_StrFileDirBuffer = s_str_file_dir_storage;
-u8 *g_StrFileDirectory = s_str_file_dir_storage;
+#include "room_sector_table.inc"
 
-u16 g_BootDisplayDataLbaTbl = 0;
-u16 g_MainAssetLbaTbl[2] = {0, 1};
-u16 g_LargeTexLbaTbl[2]  = {0, 1};
-u16 g_SmallTexLbaTbl[2]  = {0, 1};
-u16 g_FontUiLbaTbl[2]    = {0, 1};
-u16 g_SceneInitLbaTbl0[2]= {0, 1};
+u16 g_SceneInitLbaTbl0[2]   = {927, 965};
+u16 g_SceneInitLbaTbl1[2]   = {965, 969};
+u16 g_SceneAssetLbaTbl[2]   = {969, 978};
+u16 g_StrFileDirLba[2]      = {978, 1111};
+static u8 s_str_file_dir_storage[0x50000 + 16] __attribute__((aligned(16)));
+u8 *g_StrFileDirBuffer      = &s_str_file_dir_storage[16];
+u8 *g_StrFileDirectory      = &s_str_file_dir_storage[16];
+
+u16 g_BootDisplayDataLbaTbl = 978;
+u16 g_MainAssetLbaTbl[2]    = {1111, 1276};
+u16 g_LargeTexLbaTbl[2]     = {1276, 1302};
+u16 g_SmallTexLbaTbl[2]     = {1302, 1547};
+u16 g_FontUiLbaTbl[2]       = {1547, 1792};
 
 /* ── Work Buffers & Tables ─────────────────────────────────────────────────── */
 
@@ -112,7 +123,11 @@ PadPacket g_PadPackets[2];
 s32 g_FieldRenderFlagTable[32];
 s32 g_ScriptVariableBank[128];
 
-volatile int D_800BCF88 = 0;
+GeomScrollRecord g_GeomScrollRecordStorage;
+__asm__(
+    ".globl D_800BCF88\n"
+    ".set D_800BCF88, g_GeomScrollRecordStorage\n"
+);
 u32 D_8009D254 = 0;
 
 RenderBufferPrefix D_800B0E38;
@@ -124,7 +139,7 @@ u8 g_DiscChangeFlags = 0;
 
 struct {
     int baseLba;
-} g_DiscLoadState = {0};
+} g_DiscLoadState = { 1013 };
 
 u16 g_CdDiskType = 0;
 char g_CdReadErrorFormat[] = "[CDROM] Read error at LBA %u size %u\n";
@@ -198,7 +213,7 @@ MemcardImagePreset g_MemcardImagePresets[16] = {
     { 116, 180,  0 },
     { 116, 180,  0 },
     { 116, 140,  0 },
-    { 116, 180,  0 }
+    { 116, 160,  0 }
 };
 
 /* Title Screen & Squaresoft Logo asset bundle loaded from PE.IMG (0x80193254):
@@ -249,9 +264,65 @@ void func_8018F2F4(void) {
 void func_8019234C(void) {}
 void func_801235DC(void) {}
 
+extern int g_SceneDispatchToken;
+
 void Boot_RunFrame(void) {
+    if (g_GameState.pe_image_base_lba == 0) {
+        g_GameState.pe_image_base_lba = g_PeImageBaseLba ? g_PeImageBaseLba : 1013;
+    }
+    if (g_DiscLoadState.baseLba == 0) {
+        g_DiscLoadState.baseLba = g_GameState.pe_image_base_lba;
+    }
+    static int s_last_token = 0;
+    static int s_runframe_count = 0;
+    s_runframe_count++;
+    if (g_SceneDispatchToken != s_last_token || (s_runframe_count % 60 == 1)) {
+        s_last_token = g_SceneDispatchToken;
+        fprintf(stderr, "[NEW-GAME-TRACE] Boot_RunFrame: running token=0x%08X (frame_count=%d)\n",
+                (unsigned int)g_SceneDispatchToken, s_runframe_count);
+    }
     PspInput_Poll();
-    VSync(0);
+
+    if (g_SceneDispatchToken == 0xA80830C8) {
+        /* TOK_PROLOGUE: New Game prologue scene (FMV002) */
+        static int s_prologue_inited = 0;
+        if (!s_prologue_inited) {
+            s_prologue_inited = 1;
+            fprintf(stderr, "[NEW-GAME-TRACE] Dispatching New Game prologue scene (0xA80830C8) -> FMV002 Opera Opening\n");
+        }
+        /* Step the prologue: after initial frames / movie playback, transition to Carnegie Hall */
+        if (s_runframe_count >= 10) {
+            g_SceneDispatchToken = 0xA8000148;
+            fprintf(stderr, "[NEW-GAME-TRACE] Prologue transition -> Carnegie Hall field scene (token=0x%08X)\n",
+                    (unsigned int)g_SceneDispatchToken);
+        }
+    }
+
+    if (g_SceneDispatchToken == 0xA8000148) {
+        /* TOK_CARNEGIE_HALL: Playable theater / stage scene */
+        static int s_stage_inited = 0;
+        if (!s_stage_inited) {
+            s_stage_inited = 1;
+            fprintf(stderr, "[NEW-GAME-TRACE] Activating Carnegie Hall stage overlay room_m005_theater\n");
+            PspOverlay_Activate("room_m005_theater");
+
+            /* Load Map 5 theater room TIMs from PE.IMG sector 9834 (LBA 10847) */
+            static uint8_t s_stage_scratch[34 * 2048];
+            if (PspCdrom_ReadDiscSectors(g_PeImageBaseLba + 9834, 0, s_stage_scratch, 33) == 0) {
+                for (size_t off = 0; off + 8 < 33 * 2048; off += 4) {
+                    if (s_stage_scratch[off] == 0x10 && s_stage_scratch[off+1] == 0x00 &&
+                        s_stage_scratch[off+2] == 0x00 && s_stage_scratch[off+3] == 0x00) {
+                        Asset_LoadTimImage((TimFile *)&s_stage_scratch[off]);
+                    }
+                }
+                fprintf(stderr, "[NEW-GAME-TRACE] Carnegie Hall Map 5 TIMs loaded into shadow VRAM\n");
+            }
+            SetDispMask(1);
+        }
+    }
+
+    ClearOTagR(g_OtBufferTable[g_ActiveDrawSlot], 0x1000);
+    Draw_RenderFrame();
 }
 
 void Draw_RenderFrame(void) {
@@ -333,7 +404,18 @@ void *MenuWidget_FindByModeAndSelectedBase(void) { return NULL; }
 
 void Render_PrepareFrame(void) {}
 void Render_ResetGteScreenOffset(void) {}
-void Render_SetCDDCSlot(void) {}
+int Render_SetCDDCSlot(void) {
+    int mode = g_ScreenTint.fadeMode & 3;
+    if (mode == 2) {
+        g_ScreenTint.frame++;
+        if (g_ScreenTint.frame >= g_ScreenTint.duration) {
+            g_ScreenTint.fadeMode = (g_ScreenTint.fadeMode & 4) ? 0 : 1;
+        }
+    } else {
+        g_ScreenTint.fadeMode = 1;
+    }
+    return 0;
+}
 void Render_SetGteScreenOffset(void) {}
 void Render_SetupColorTable(int index, int mode, short *colors) {
     (void)index; (void)mode; (void)colors;
@@ -346,7 +428,23 @@ void Save_InitSystem(void) {}
 void Save_PostInitStub(void) {}
 void Save_SetTitleStyleFlag(int flag) { (void)flag; }
 
-void Scene_LoadFieldBg(void) {}
+int Scene_LoadFieldBg(void) {
+    if (!(g_GameState.flags & 1)) return 0;
+    static uint8_t s_bg_buf[32 * 2048];
+    if (PspCdrom_ReadDiscSectors(g_PeImageBaseLba + 157, 0, s_bg_buf, 23) == 0) {
+        for (size_t off = 0; off + 8 < 23 * 2048; off += 4) {
+            if (s_bg_buf[off] == 0x10 && s_bg_buf[off+1] == 0x00 &&
+                s_bg_buf[off+2] == 0x00 && s_bg_buf[off+3] == 0x00) {
+                Asset_LoadTimImage((TimFile *)&s_bg_buf[off]);
+            }
+        }
+        fprintf(stderr, "[NEW-GAME-TRACE] Scene_LoadFieldBg: loaded field BG TIMs from PE.IMG sector 157\n");
+    }
+    PutDispEnv(&g_RenderDispEnvArray[g_ActiveDrawSlot]);
+    SetDispMask(1);
+    g_GameState.flags &= ~1;
+    return 0;
+}
 void Scene_LoadSceneData(void) {
     /* Read real startup notice TIM (LBA 1013, sector 0 of PE.IMG) into shadow VRAM */
     static uint8_t s_notice_buf[72 * 2048];
@@ -359,7 +457,6 @@ void Scene_LoadSceneData(void) {
      * Bundle starts at PE.IMG sector 965 + 0xAA64 (sector 986 + 0x264) and spans 128 sectors (~260 KB). */
     if (PspCdrom_ReadDiscSectors(g_PeImageBaseLba + 965 + 21, 0, g_MemcardImageBundle, 130) == 0) {
         memmove(g_MemcardImageBundle, g_MemcardImageBundle + 0x264, 128 * 2048);
-        memcpy(g_MemcardImagePresets, g_MemcardImageBundle + 0x3DB08, 8 * sizeof(MemcardImagePreset));
         fprintf(stderr, "[PE-PSP] Real menu_memcard Title Screen & Logo bundle loaded from PE.IMG (128 sectors, offsets[0]=%d, offsets[8]=%d).\n",
                 ((int *)(g_MemcardImageBundle + 4))[0], ((int *)(g_MemcardImageBundle + 4))[8]);
     }

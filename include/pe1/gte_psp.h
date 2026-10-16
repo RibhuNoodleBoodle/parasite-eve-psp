@@ -111,7 +111,12 @@ static inline void psp_gte_rtps_impl(void) {
     int32_t sxy, p, f;
     PspGte_RotTransPers(&sv, &sxy, &p, &f);
     g_psp_gte_hw.sxy[0] = (uint32_t)sxy;
-    g_psp_gte_hw.sz[0]  = (uint32_t)p;
+    g_psp_gte_hw.sz[0]  = g_psp_gte_hw.sz[3];
+    uint32_t sz = (uint32_t)(p > 0 ? p : 1);
+    g_psp_gte_hw.sz[3]  = sz;
+    uint32_t otz = (sz < 4096) ? sz : 4095;
+    g_psp_gte_hw.otz    = otz;
+    g_psp_gte_hw.mac0   = (int32_t)otz;
     g_psp_gte_hw.flag   = (uint32_t)f;
 }
 
@@ -124,8 +129,33 @@ static inline void psp_gte_rtpt_impl(void) {
     g_psp_gte_hw.sxy[0] = (uint32_t)sxy0;
     g_psp_gte_hw.sxy[1] = (uint32_t)sxy1;
     g_psp_gte_hw.sxy[2] = (uint32_t)sxy2;
-    g_psp_gte_hw.otz    = (uint32_t)p;
+    g_psp_gte_hw.sz[0]  = g_psp_gte_hw.sz[3];
+    uint32_t sz = (uint32_t)(p > 0 ? p : 1);
+    g_psp_gte_hw.sz[1]  = sz;
+    g_psp_gte_hw.sz[2]  = sz;
+    g_psp_gte_hw.sz[3]  = sz;
+    uint32_t otz = (sz < 4096) ? sz : 4095;
+    g_psp_gte_hw.otz    = otz;
+    g_psp_gte_hw.mac0   = (int32_t)otz;
     g_psp_gte_hw.flag   = (uint32_t)f;
+}
+
+static inline void psp_gte_avsz3_impl(void) {
+    uint32_t sum = g_psp_gte_hw.sz[1] + g_psp_gte_hw.sz[2] + g_psp_gte_hw.sz[3];
+    uint32_t otz = sum / 3;
+    if (otz >= 4096) otz = 4095;
+    if (otz == 0) otz = 1;
+    g_psp_gte_hw.otz = otz;
+    g_psp_gte_hw.mac0 = (int32_t)otz;
+}
+
+static inline void psp_gte_avsz4_impl(void) {
+    uint32_t sum = g_psp_gte_hw.sz[0] + g_psp_gte_hw.sz[1] + g_psp_gte_hw.sz[2] + g_psp_gte_hw.sz[3];
+    uint32_t otz = sum / 4;
+    if (otz >= 4096) otz = 4095;
+    if (otz == 0) otz = 1;
+    g_psp_gte_hw.otz = otz;
+    g_psp_gte_hw.mac0 = (int32_t)otz;
 }
 
 static inline int32_t psp_gte_nclip_impl(void) {
@@ -187,8 +217,8 @@ static inline int32_t psp_gte_nclip_impl(void) {
 
 #define gte_rtpt_command()                     psp_gte_rtpt_impl()
 #define gte_rtps_command()                     psp_gte_rtps_impl()
-#define gte_avsz3_command()                    do {} while(0)
-#define gte_avsz4_command()                    do {} while(0)
+#define gte_avsz3_command()                    psp_gte_avsz3_impl()
+#define gte_avsz4_command()                    psp_gte_avsz4_impl()
 #define gte_mvmva_rotation_v0_sf12()           psp_gte_mvmva_impl()
 #define gte_mvmva_rotation_v0_translation_sf12() psp_gte_mvmva_impl()
 

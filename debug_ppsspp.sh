@@ -83,37 +83,45 @@ MemStickDirectory = $ROOT_DIR/dist
 MemStickInserted = True
 MemStickSize = 16
 [CPU]
-CPUCore = 0
-FastMemoryAccess = False
+CPUCore = 1
+FastMemoryAccess = True
 [Graphics]
 GraphicsBackend = 0
 RenderingMode = 1
 SoftwareRendering = False
 InternalResolution = 1
 DisplayResolution = 1
+VerticalSync = False
 [Log]
-SystemLevel = 6
-G3DLevel = 6
-HLELevel = 6
-IOLevel = 6
-FramebufLevel = 6
-SCEIO = 6
+SystemLevel = 3
+G3DLevel = 3
+HLELevel = 3
+IOLevel = 3
+FramebufLevel = 3
+SCEIO = 3
 PRINTF = 6
 EOF
 
 echo ""
-echo "=== [Step 3] Running Portable PPSSPP AppImage (12s timeout) ==="
+RUN_TIMEOUT="${RUN_TIMEOUT:-20s}"
+echo "=== [Step 3] Running Portable PPSSPP AppImage (${RUN_TIMEOUT} timeout) ==="
 rm -f "$LOG_FILE" "$PPSSPP_DIR/ probe"*.log 2>/dev/null || true
 touch "$ROOT_DIR/dist/PSP/GAME/ParasiteEve/frame_dump_enable.flag" 2>/dev/null || true
 touch "$MEMSTICK_GAME_DIR/frame_dump_enable.flag" 2>/dev/null || true
 
+if [[ "${PE_AUTOTEST:-1}" == "1" ]]; then
+    touch "$ROOT_DIR/dist/PSP/GAME/ParasiteEve/autotest.flag" 2>/dev/null || true
+    touch "$MEMSTICK_GAME_DIR/autotest.flag" 2>/dev/null || true
+fi
+
 if [[ -x "$APPIMAGE_BIN" ]]; then
-    HOME="$(pwd)/.ppsspp" timeout 12s ./.ppsspp/*.AppImage --appimage-extract-and-run -v --log="$(pwd)/.ppsspp/ppsspp_debug.log" "$(pwd)/dist/PSP/GAME/ParasiteEve/EBOOT.PBP" || true
+    HOME="$(pwd)/.ppsspp" PE_AUTOTEST="${PE_AUTOTEST:-1}" timeout "${RUN_TIMEOUT}" ./.ppsspp/*.AppImage --appimage-extract-and-run -v --log="$(pwd)/.ppsspp/ppsspp_debug.log" "$(pwd)/dist/PSP/GAME/ParasiteEve/EBOOT.PBP" || true
 else
-    HOME="$(pwd)/.ppsspp" timeout 12s /lib64/ld-linux-x86-64.so.2 ./.ppsspp/*.AppImage --appimage-extract-and-run -v --log="$(pwd)/.ppsspp/ppsspp_debug.log" "$(pwd)/dist/PSP/GAME/ParasiteEve/EBOOT.PBP" || true
+    HOME="$(pwd)/.ppsspp" PE_AUTOTEST="${PE_AUTOTEST:-1}" timeout "${RUN_TIMEOUT}" /lib64/ld-linux-x86-64.so.2 ./.ppsspp/*.AppImage --appimage-extract-and-run -v --log="$(pwd)/.ppsspp/ppsspp_debug.log" "$(pwd)/dist/PSP/GAME/ParasiteEve/EBOOT.PBP" || true
 fi
 
 rm -f "$ROOT_DIR/dist/PSP/GAME/ParasiteEve/frame_dump_enable.flag" "$MEMSTICK_GAME_DIR/frame_dump_enable.flag" 2>/dev/null || true
+rm -f "$ROOT_DIR/dist/PSP/GAME/ParasiteEve/autotest.flag" "$MEMSTICK_GAME_DIR/autotest.flag" 2>/dev/null || true
 
 # Sync frame_dump.ppm and frame_dump_logo.ppm into .ppsspp/, dist/, and project root if written via ms0:/ or host0:/
 for ppm_name in "frame_dump.ppm" "frame_dump_logo.ppm"; do

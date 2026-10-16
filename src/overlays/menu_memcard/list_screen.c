@@ -17,6 +17,7 @@ static inline MemcardImageNode *MenuCard_FindImageNode(s32 kind) {
 
 #if defined(__psp__) || defined(ENABLE_PSP)
 #include <stdio.h>
+#include <stdlib.h>
 #endif
 
 /* Scroll and confirm handling for the memory card list screen. */
@@ -26,11 +27,6 @@ void MenuCard_HandleListInput(void) {
     MemcardImageNode *node;
 
     pad = Draw_RemapStatusFlags();
-#if defined(__psp__) || defined(ENABLE_PSP)
-    if (g_MemcardScreenTimer == 45) {
-        pad |= 0x800;
-    }
-#endif
     if ((pad & 0x800) && !(g_MemcardPrevPad & 0x800)) {
         node = MenuCard_FindImageNode(2);
         if (node != 0 && node->intensity > 0x80) {
@@ -170,7 +166,8 @@ void MenuCard_ShowLogoFade(void) {
     SetDispMask(1);
 
 #if defined(__psp__) || defined(ENABLE_PSP)
-    for (i = 0; i < 90; i++) {
+    int max_logo_frames = (getenv("PE_AUTOTEST") != NULL) ? 8 : 90;
+    for (i = 0; i < max_logo_frames; i++) {
         page = g_MemcardScreenPage == 0;
         g_MemcardScreenPage = page;
         g_MemcardCurrentScreen = g_MemcardScreenBuffers[page];
@@ -527,7 +524,12 @@ s32 MenuCard_RunListScreen(void) {
                 GameTime_InitCounter0();
             } else if ((selectionY >= 0xB5) || ((selectionY == 0xB4) && (MemCard_IsPortPresent(0) == 0) && (MemCard_IsPortPresent(1) == 0))) {
                 result = 3;
-            } else {
+            }
+#if defined(__psp__) || defined(ENABLE_PSP)
+            fprintf(stderr, "[PE-PSP] MenuCard_RunListScreen: Selection confirmed at Y=0x%X -> result=%d (%s)\n",
+                    selectionY, result, (result == 1) ? "NEW GAME" : (result == 3) ? "TUTORIAL" : "CONTINUE/OTHER");
+#endif
+            if (selectionY != 0xA0 && !((selectionY >= 0xB5) || ((selectionY == 0xB4) && (MemCard_IsPortPresent(0) == 0) && (MemCard_IsPortPresent(1) == 0)))) {
                 Draw_SetPresentImage((u8 *)g_MemcardSecondScreenView + 0x1C080);
                 image = (MemcardImage *)&g_MemcardImageBundle[*g_MemcardImageOffsets];
                 source = (u32 *)(image + 1);

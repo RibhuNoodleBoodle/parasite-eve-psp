@@ -704,6 +704,10 @@ CdlLOC *CdIntToPos(int lba, CdlLOC *msf)
     return msf;
 }
 
+static void fire_cd_sync_callback(void);
+static void fire_cd_ready_callback(void);
+static void fire_cd_read_callback(void);
+
 int CdControl(unsigned char com, unsigned char *param, unsigned char *result)
 {
     if (result) *result = (s_cd.status != 0) ? s_cd.status : 0x02; /* 0x02 = CdlStatStandby */
@@ -720,12 +724,20 @@ int CdControl(unsigned char com, unsigned char *param, unsigned char *result)
         return 1;
     case CdlSeekL:
     case CdlSeekP:
+        if (param) {
+            uint32_t lba = (uint32_t)CdPosToInt((CdlLOC *)param);
+            s_cd.current_lba = lba;
+            PspCdrom_SeekLba(lba);
+        }
+        s_cd.status = 0x02; /* CdlStatStandby */
+        fire_cd_sync_callback();
         return 1;
     case CdlStandby:
     case CdlPause:
     case CdlStop:
         s_cd.status &= (uint8_t)~PSP_CD_STAT_READING;
         s_cd.status |= PSP_CD_STAT_IDLE;
+        fire_cd_sync_callback();
         return 1;
     case CdlSetmode:
         return 1;
@@ -774,43 +786,55 @@ CdlCB CdReadCallback(CdlCB func)
     return prev;
 }
 
+static int s_cd_sync_cb_depth = 0;
 static void fire_cd_sync_callback(void)
 {
     unsigned char res[8];
     memset(res, 0, sizeof(res));
-    res[0] = s_cd.status; /* CdlStatStandby (0x02) */
+    res[0] = s_cd.status ? s_cd.status : 0x02; /* CdlStatStandby (0x02) */
+    if (s_cd_sync_cb_depth > 8) return;
+    s_cd_sync_cb_depth++;
     if (s_cd_sync_cb) {
         s_cd_sync_cb(0x02 /* CdlComplete */, res);
     }
     if (g_CdSyncCallback) {
         g_CdSyncCallback(0x02 /* CdlComplete */, res);
     }
+    s_cd_sync_cb_depth--;
 }
 
+static int s_cd_ready_cb_depth = 0;
 static void fire_cd_ready_callback(void)
 {
     unsigned char res[8];
     memset(res, 0, sizeof(res));
-    res[0] = s_cd.status; /* CdlStatStandby (0x02) */
+    res[0] = s_cd.status ? s_cd.status : 0x02; /* CdlStatStandby (0x02) */
+    if (s_cd_ready_cb_depth > 8) return;
+    s_cd_ready_cb_depth++;
     if (s_cd_ready_cb) {
         s_cd_ready_cb(0x01 /* CdlDataReady */, res);
     }
     if (g_CdReadyCallback) {
         g_CdReadyCallback(0x01 /* CdlDataReady */, res);
     }
+    s_cd_ready_cb_depth--;
 }
 
+static int s_cd_read_cb_depth = 0;
 static void fire_cd_read_callback(void)
 {
     unsigned char res[8];
     memset(res, 0, sizeof(res));
-    res[0] = s_cd.status; /* CdlStatStandby (0x02) */
+    res[0] = s_cd.status ? s_cd.status : 0x02; /* CdlStatStandby (0x02) */
+    if (s_cd_read_cb_depth > 8) return;
+    s_cd_read_cb_depth++;
     if (s_cd_read_cb) {
         s_cd_read_cb(0x02 /* CdlComplete */, res);
     }
     if (g_CdReadCallback) {
         g_CdReadCallback(0x02 /* CdlComplete */, res);
     }
+    s_cd_read_cb_depth--;
 }
 
 int CdRead(int sectors, unsigned long *buf, int mode)
@@ -837,7 +861,6 @@ int CdSync(int mode, unsigned char *result)
     if (result) {
         result[0] = s_cd.status;
     }
-    fire_cd_sync_callback();
     return 0; /* CdlComplete (0) */
 }
 

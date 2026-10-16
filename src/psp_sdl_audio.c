@@ -495,8 +495,62 @@ int HostAudio_QueueFrames(void)
     return PspAudio_QueueFrames();
 }
 
+/* ── SPU Transfer & Reverb Sync (libspu) ─────────────────────────────────────── */
+
+static uint8_t s_spu_ram[512 * 1024]; /* 512 KB SPU RAM */
+static uint32_t s_spu_trans_addr = 0;
+static int s_spu_trans_mode = 0;
+typedef void (*SpuTransferCallbackProc)(void);
+static SpuTransferCallbackProc s_spu_trans_callback = NULL;
+
+int SpuSetTransferMode(int mode)
+{
+    int prev = s_spu_trans_mode;
+    s_spu_trans_mode = mode;
+    return prev;
+}
+
+int SpuSetTransferStartAddr(unsigned long addr)
+{
+    s_spu_trans_addr = (uint32_t)(addr & 0x7FFFF);
+    return 0;
+}
+
+unsigned int SpuWrite(void *address, unsigned int size)
+{
+    if (!address || size == 0) return 0;
+    if (s_spu_trans_addr + size > sizeof(s_spu_ram)) {
+        size = sizeof(s_spu_ram) - s_spu_trans_addr;
+    }
+    memcpy(&s_spu_ram[s_spu_trans_addr], address, size);
+    s_spu_trans_addr += size;
+    if (s_spu_trans_callback) {
+        s_spu_trans_callback();
+    }
+    return size;
+}
+
 long SpuIsTransferCompleted(long flag)
 {
     (void)flag;
     return 1;
+}
+
+long SpuReserveReverbWorkArea(long flag)
+{
+    (void)flag;
+    return 1;
+}
+
+long SpuClearReverbWorkArea(long flag)
+{
+    (void)flag;
+    return 0;
+}
+
+SpuTransferCallbackProc SpuSetTransferCallback(SpuTransferCallbackProc func)
+{
+    SpuTransferCallbackProc prev = s_spu_trans_callback;
+    s_spu_trans_callback = func;
+    return prev;
 }

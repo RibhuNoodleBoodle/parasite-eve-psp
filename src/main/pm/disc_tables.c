@@ -27,6 +27,7 @@
 #include "pe1/scene_dispatch.h"
 #include "pe1/script_queue.h"
 #include "include_asm.h"
+#include <stdio.h>
 
 int Draw_InitDisplay(int mode) {
     int mode_reg;
@@ -112,6 +113,10 @@ int Draw_InitDisplay(int mode) {
     } else if (mode_reg == 3) {
         g_SceneDispatchToken = 0xA80651C8;
     }
+#if defined(__psp__) || defined(ENABLE_PSP)
+    fprintf(stderr, "[PE-PSP] Draw_InitDisplay: mode=%d -> g_SceneDispatchToken = 0x%08X\n",
+            mode_reg, (unsigned int)g_SceneDispatchToken);
+#endif
     return 0;
 }
 

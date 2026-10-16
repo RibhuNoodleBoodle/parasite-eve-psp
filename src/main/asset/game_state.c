@@ -6,6 +6,7 @@
 #include "pe1/boot_services.h"
 #include "pe1/cdrom.h"
 #include "pe1/cdrom_buffers.h"
+#include "pe1/disc_load_state.h"
 #include "pe1/draw_buffers.h"
 #include "pe1/font.h"
 #include "pe1/game_state.h"
@@ -43,6 +44,8 @@ int Asset_OpenPeImage(void)
         found = DsSearchFile(&file, g_PeImagePath);
         if (found != 0 && found != (DslFILE *)-1) {
             g_PeImageBaseLba = DsPosToInt(&file.pos);
+            g_GameState.pe_image_base_lba = g_PeImageBaseLba;
+            g_DiscLoadState.baseLba = g_PeImageBaseLba;
             g_PeImageMountFlags = (u8)g_PeImageMountFlags | 1;
         }
     }
@@ -59,6 +62,8 @@ int Asset_OpenPeImage(void)
                 asm volatile("" : : "r"(found));
                 if (found != (DslFILE *)-1) {
                     g_PeImageBaseLba = DsPosToInt(&file.pos);
+                    g_GameState.pe_image_base_lba = g_PeImageBaseLba;
+                    g_DiscLoadState.baseLba = g_PeImageBaseLba;
                     g_PeImageMountFlags = (u8)g_PeImageMountFlags | 2;
                 }
             }
@@ -70,6 +75,13 @@ int Asset_OpenPeImage(void)
 /* Boot notice screen and disc check; mode 1 or 2 is the expected disc. */
 int Render_InitDisplayLists(int mode)
 {
+#if defined(__psp__) || defined(ENABLE_PSP)
+    g_GameState.display_list_modes |= (u8)mode;
+    g_GameState.loaded_scene_assets = (union SceneAssetView *)g_LoadedSceneAssetBlock[0];
+    g_GameState.scene_load_scratch = g_SceneLoadScratchBuffer[0];
+    g_GameState.str_file_directory = g_StrFileDirectory;
+    return 0;
+#endif
     RECT rect;
     u8 result[8];
     short colors[8];
@@ -86,6 +98,12 @@ int Render_InitDisplayLists(int mode)
     colors[0] = -1;
     VSync(0);
     SetDispMask(0);
+    if (g_GameState.pe_image_base_lba == 0) {
+        g_GameState.pe_image_base_lba = g_PeImageBaseLba ? g_PeImageBaseLba : 1013;
+    }
+    if (g_DiscLoadState.baseLba == 0) {
+        g_DiscLoadState.baseLba = g_GameState.pe_image_base_lba;
+    }
     /* Recorded crutch debt: retail's CD retry loops restart through gotos,
      * not reproducible with structured loops in stock GCC 2.7.2 (loop.c
      * hoists the read constants out of the restart path). */
@@ -262,6 +280,7 @@ retryFog:
     while ((wait = DsSystemStatus()) != 1)
         VSync(0);
     g_CdDiskType = DsShellOpen();
+    g_GameState.display_list_modes |= (u8)mode;
     return 0;
 }
 
@@ -450,6 +469,15 @@ void Boot_InitGameState(void)
 {
     Boot_InitMemoryLayout();
     Asset_ResetGameState();
+    if (g_GameState.pe_image_base_lba == 0) {
+        g_GameState.pe_image_base_lba = g_PeImageBaseLba ? g_PeImageBaseLba : 1013;
+    }
+    if (g_DiscLoadState.baseLba == 0) {
+        g_DiscLoadState.baseLba = g_GameState.pe_image_base_lba;
+    }
+    g_GameState.loaded_scene_assets = (union SceneAssetView *)g_LoadedSceneAssetBlock[0];
+    g_GameState.scene_load_scratch = g_SceneLoadScratchBuffer[0];
+    g_GameState.str_file_directory = g_StrFileDirectory;
 }
 
 void Asset_ResetGameState(void)
