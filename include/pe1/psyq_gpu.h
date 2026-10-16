@@ -13,12 +13,15 @@
 #endif
 #endif
 
+#ifndef RECT_DEFINED
+#define RECT_DEFINED
 typedef struct RECT {
     short x;
     short y;
     short w;
     short h;
 } RECT;
+#endif
 
 /* The GPU command stream consumes each RECT as two packed words. */
 typedef struct GpuRectWords {
@@ -47,11 +50,16 @@ typedef struct GpuCmdPacket {
     int field8;
 } GpuCmdPacket;
 
+#ifndef DR_ENV_DEFINED
+#define DR_ENV_DEFINED
 typedef struct DR_ENV {
     u_long tag;
     u_long code[15];
 } DR_ENV;
+#endif
 
+#ifndef DRAWENV_DEFINED
+#define DRAWENV_DEFINED
 typedef struct DRAWENV {
     RECT clip;
     short ofs[2];
@@ -65,7 +73,10 @@ typedef struct DRAWENV {
     u_char b0;
     DR_ENV dr_env;
 } DRAWENV;
+#endif
 
+#ifndef DISPENV_DEFINED
+#define DISPENV_DEFINED
 typedef struct DISPENV {
     RECT disp;
     RECT screen;
@@ -74,6 +85,7 @@ typedef struct DISPENV {
     u_char pad0;
     u_char pad1;
 } DISPENV;
+#endif
 
 PE1_GPU_STATIC_ASSERT(sizeof(DRAWENV) == 0x5C, drawenv_size);
 PE1_GPU_STATIC_ASSERT(sizeof(DISPENV) == 0x14, dispenv_size);

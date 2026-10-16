@@ -1,6 +1,8 @@
 #ifndef PE1_COMMON_H
 #define PE1_COMMON_H
 
+#ifndef PSP_LEGACY_TYPES_DEFINED
+#define PSP_LEGACY_TYPES_DEFINED
 typedef signed char s8;
 typedef unsigned char u8;
 typedef signed short s16;
@@ -9,6 +11,7 @@ typedef signed int s32;
 typedef unsigned int u32;
 typedef signed long long s64;
 typedef unsigned long long u64;
+#endif
 typedef float f32;
 
 /* C89-compatible compile-time assertion for the original GCC toolchain. Use a
