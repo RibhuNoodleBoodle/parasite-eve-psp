@@ -223,6 +223,20 @@ DISPENV *PspGpu_SetDefDispEnv(DISPENV *env, int x, int y, int w, int h);
 uint16_t *PspGpu_GetVramPointer(void);
 void PspGpu_InvalidateVramRange(uint32_t x, uint32_t y, uint32_t w, uint32_t h);
 
+/* PS1 Psy-Q Standard API Declarations */
+int  DrawSync(int mode);
+int  VSync(int mode);
+int  ResetGraph(int mode);
+int  SetDispMask(int mask);
+int  LoadImage(const RECT *rect, const void *pixels);
+int  StoreImage(const RECT *rect, void *pixels);
+int  MoveImage(const RECT *src, int dst_x, int dst_y);
+void ClearImage(const RECT *rect, uint8_t r, uint8_t g, uint8_t b);
+DRAWENV *PutDrawEnv(const DRAWENV *env);
+DISPENV *PutDispEnv(const DISPENV *env);
+void DrawOTag(const uint32_t *ot);
+void DrawPrim(const void *p);
+
 #ifdef __cplusplus
 }
 #endif

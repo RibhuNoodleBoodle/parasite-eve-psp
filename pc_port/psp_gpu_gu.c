@@ -125,6 +125,8 @@ static void ApplyTexture(uint16_t tpage, uint16_t clut, int raw_texture) {
     uint32_t clut_y  = (clut >> 6) & 0x1FF;
 
     sceGuEnable(GU_TEXTURE_2D);
+    sceGuEnable(GU_ALPHA_TEST);
+    sceGuAlphaFunc(GU_GREATER, 0, 0x01);
 
     /* Texture Filtering */
     if (g_psp_gpu.filter_mode == PSP_FILTER_BILINEAR) {
@@ -141,21 +143,37 @@ static void ApplyTexture(uint16_t tpage, uint16_t clut, int raw_texture) {
     }
 
     switch (depth) {
-    case 0:
+    case 0: {
         /* 4-bit Indexed CLUT (GU_PSM_T4) */
+        uint16_t *clut_ptr = &g_ps1_vram[clut_y * PS1_VRAM_WIDTH + clut_x];
+        for (int i = 0; i < 16; i++) {
+            if (clut_ptr[i] != 0 && !(clut_ptr[i] & 0x8000)) {
+                clut_ptr[i] |= 0x8000;
+            }
+        }
+        sceKernelDcacheWritebackRange(clut_ptr, 16 * sizeof(uint16_t));
         sceGuClutMode(GU_PSM_5551, 0, 0xFF, 0);
-        sceGuClutLoad(2, &g_ps1_vram[clut_y * PS1_VRAM_WIDTH + clut_x]);
+        sceGuClutLoad(2, clut_ptr);
         sceGuTexMode(GU_PSM_T4, 0, 0, 0);
         sceGuTexImage(0, 1024, 512, 1024, g_ps1_vram);
         break;
+    }
 
-    case 1:
+    case 1: {
         /* 8-bit Indexed CLUT (GU_PSM_T8) */
+        uint16_t *clut_ptr = &g_ps1_vram[clut_y * PS1_VRAM_WIDTH + clut_x];
+        for (int i = 0; i < 256; i++) {
+            if (clut_ptr[i] != 0 && !(clut_ptr[i] & 0x8000)) {
+                clut_ptr[i] |= 0x8000;
+            }
+        }
+        sceKernelDcacheWritebackRange(clut_ptr, 256 * sizeof(uint16_t));
         sceGuClutMode(GU_PSM_5551, 0, 0xFF, 0);
-        sceGuClutLoad(32, &g_ps1_vram[clut_y * PS1_VRAM_WIDTH + clut_x]);
+        sceGuClutLoad(32, clut_ptr);
         sceGuTexMode(GU_PSM_T8, 0, 0, 0);
         sceGuTexImage(0, 1024, 512, 1024, g_ps1_vram);
         break;
+    }
 
     case 2:
     default:
@@ -192,6 +210,7 @@ void PspGpu_Init(void) {
     /* Initialize PSP Graphics Engine (libgu) */
     sceGuInit();
 
+    sceKernelDcacheWritebackInvalidateAll();
     sceGuStart(GU_DIRECT, g_display_list);
 
     /* Setup 16-bit double buffered 512-stride framebuffers */
@@ -214,6 +233,7 @@ void PspGpu_Init(void) {
     sceGuShadeModel(GU_SMOOTH);
     sceGuDisable(GU_DITHER);
 
+    sceKernelDcacheWritebackInvalidateAll();
     sceGuFinish();
     sceGuSync(0, 0);
 
@@ -280,6 +300,9 @@ void PspGpu_Sync(void) {
 void PspGpu_BeginFrame(void) {
     if (g_psp_gpu.in_frame) return;
 
+    /* Flush D-Cache to physical RAM before starting display list */
+    sceKernelDcacheWritebackInvalidateAll();
+
     sceGuStart(GU_DIRECT, g_display_list);
 
     /* Scissor to active display bounds */
@@ -296,6 +319,7 @@ void PspGpu_BeginFrame(void) {
 void PspGpu_EndFrame(void) {
     if (!g_psp_gpu.in_frame) return;
 
+    sceKernelDcacheWritebackInvalidateAll();
     sceGuFinish();
     sceGuSync(0, 0);
 
@@ -306,11 +330,9 @@ void PspGpu_Flip(void) {
     PspGpu_EndFrame();
 
     sceDisplayWaitVblankStart();
-    /* Swap display and draw buffer pointers */
+    /* Swap display and draw buffer pointers via sceGuSwapBuffers */
     g_psp_gpu.disp_buffer = g_psp_gpu.draw_buffer;
-    g_psp_gpu.draw_buffer = (void*)((uint32_t)g_psp_gpu.draw_buffer ^ (uint32_t)EDRAM_DISP_OFFSET);
-
-    sceGuSwapBuffers();
+    g_psp_gpu.draw_buffer = sceGuSwapBuffers();
     g_psp_gpu.frame_counter++;
 }
 
@@ -333,7 +355,14 @@ int PspGpu_LoadImage(const RECT *rect, const void *pixels) {
         int dst_y = (y + row) & 0x1FF;
         for (int col = 0; col < w; col++) {
             int dst_x = (x + col) & 0x3FF;
-            g_ps1_vram[dst_y * PS1_VRAM_WIDTH + dst_x] = src[row * w + col];
+            uint16_t pix = src[row * w + col];
+            /* PS1 15-bit color format: 0x0000 is color-key transparent.
+             * Non-zero pixels need bit 15 set to 1 for PSP GU_PSM_5551
+             * alpha (opaque) so they are preserved under alpha testing. */
+            if (pix != 0) {
+                pix |= 0x8000;
+            }
+            g_ps1_vram[dst_y * PS1_VRAM_WIDTH + dst_x] = pix;
         }
     }
 
@@ -390,8 +419,11 @@ int PspGpu_MoveImage(const RECT *src, int dst_x, int dst_y) {
 void PspGpu_ClearImage(const RECT *rect, uint8_t r, uint8_t g, uint8_t b) {
     if (!rect || rect->w <= 0 || rect->h <= 0) return;
 
-    /* 15-bit color: 1 bit 0, 5 bits B, 5 bits G, 5 bits R */
+    /* 15-bit color: 1 bit alpha, 5 bits B, 5 bits G, 5 bits R */
     uint16_t pixel = (uint16_t)(((b >> 3) << 10) | ((g >> 3) << 5) | (r >> 3));
+    if (pixel != 0 || (r != 0 || g != 0 || b != 0)) {
+        pixel |= 0x8000;
+    }
     int x = rect->x & 0x3FF;
     int y = rect->y & 0x1FF;
     int w = rect->w;
@@ -554,6 +586,7 @@ void PspGpu_ExecuteSinglePrim(const uint32_t *packet) {
 
         ApplySemiTransparency(is_semi_trans, abr_mode);
         sceGuDisable(GU_TEXTURE_2D);
+        sceGuDisable(GU_ALPHA_TEST);
 
         PspVertexColor2D *v = g_temp_col_verts;
         v[0].color = col; v[0].x = x0; v[0].y = y0; v[0].z = 0;
@@ -620,6 +653,7 @@ void PspGpu_ExecuteSinglePrim(const uint32_t *packet) {
 
         ApplySemiTransparency(is_semi_trans, abr_mode);
         sceGuDisable(GU_TEXTURE_2D);
+        sceGuDisable(GU_ALPHA_TEST);
 
         PspVertexColor2D *v = g_temp_col_verts;
         /* Quad as 4-vertex triangle strip (0, 1, 2, 3) */
@@ -691,6 +725,7 @@ void PspGpu_ExecuteSinglePrim(const uint32_t *packet) {
 
         ApplySemiTransparency(is_semi_trans, abr_mode);
         sceGuDisable(GU_TEXTURE_2D);
+        sceGuDisable(GU_ALPHA_TEST);
 
         PspVertexColor2D *v = g_temp_col_verts;
         v[0].color = c0; v[0].x = x0; v[0].y = y0; v[0].z = 0;
@@ -756,6 +791,7 @@ void PspGpu_ExecuteSinglePrim(const uint32_t *packet) {
 
         ApplySemiTransparency(is_semi_trans, abr_mode);
         sceGuDisable(GU_TEXTURE_2D);
+        sceGuDisable(GU_ALPHA_TEST);
 
         PspVertexColor2D *v = g_temp_col_verts;
         v[0].color = c0; v[0].x = x0; v[0].y = y0; v[0].z = 0;
@@ -822,6 +858,7 @@ void PspGpu_ExecuteSinglePrim(const uint32_t *packet) {
 
         ApplySemiTransparency(is_semi_trans, abr_mode);
         sceGuDisable(GU_TEXTURE_2D);
+        sceGuDisable(GU_ALPHA_TEST);
 
         PspVertexColor2D *v = g_temp_col_verts;
         v[0].color = col; v[0].x = x0; v[0].y = y0; v[0].z = 0;
@@ -837,6 +874,7 @@ void PspGpu_ExecuteSinglePrim(const uint32_t *packet) {
         uint32_t col = PsxColorToPsp((uint8_t)word1, (uint8_t)(word1 >> 8), (uint8_t)(word1 >> 16), 0xFF);
         ApplySemiTransparency(is_semi_trans, abr_mode);
         sceGuDisable(GU_TEXTURE_2D);
+        sceGuDisable(GU_ALPHA_TEST);
 
         /* Variable length packet terminated by 0x55555555 */
         uint32_t len = (packet[0] >> 24) & 0xFF;
@@ -874,6 +912,7 @@ void PspGpu_ExecuteSinglePrim(const uint32_t *packet) {
 
         ApplySemiTransparency(is_semi_trans, abr_mode);
         sceGuDisable(GU_TEXTURE_2D);
+        sceGuDisable(GU_ALPHA_TEST);
 
         PspVertexColor2D *v = g_temp_col_verts;
         v[0].color = c0; v[0].x = x0; v[0].y = y0; v[0].z = 0;
@@ -888,6 +927,7 @@ void PspGpu_ExecuteSinglePrim(const uint32_t *packet) {
     case 0x58: case 0x59: case 0x5A: case 0x5B: {
         ApplySemiTransparency(is_semi_trans, abr_mode);
         sceGuDisable(GU_TEXTURE_2D);
+        sceGuDisable(GU_ALPHA_TEST);
 
         uint32_t len = (packet[0] >> 24) & 0xFF;
         if (len < 4) len = 4;
@@ -931,6 +971,7 @@ void PspGpu_ExecuteSinglePrim(const uint32_t *packet) {
 
         ApplySemiTransparency(is_semi_trans, abr_mode);
         sceGuDisable(GU_TEXTURE_2D);
+        sceGuDisable(GU_ALPHA_TEST);
 
         PspVertexColor2D *v = g_temp_col_verts;
         v[0].color = col; v[0].x = x0; v[0].y = y0; v[0].z = 0;
@@ -988,6 +1029,7 @@ void PspGpu_ExecuteSinglePrim(const uint32_t *packet) {
 
         ApplySemiTransparency(is_semi_trans, abr_mode);
         sceGuDisable(GU_TEXTURE_2D);
+        sceGuDisable(GU_ALPHA_TEST);
 
         PspVertexColor2D *v = g_temp_col_verts;
         v[0].color = col; v[0].x = x0; v[0].y = y0; v[0].z = 0;
@@ -1010,6 +1052,7 @@ void PspGpu_ExecuteSinglePrim(const uint32_t *packet) {
 
         ApplySemiTransparency(is_semi_trans, abr_mode);
         sceGuDisable(GU_TEXTURE_2D);
+        sceGuDisable(GU_ALPHA_TEST);
 
         PspVertexColor2D *v = g_temp_col_verts;
         v[0].color = col; v[0].x = x0; v[0].y = y0; v[0].z = 0;
@@ -1064,6 +1107,7 @@ void PspGpu_ExecuteSinglePrim(const uint32_t *packet) {
 
         ApplySemiTransparency(is_semi_trans, abr_mode);
         sceGuDisable(GU_TEXTURE_2D);
+        sceGuDisable(GU_ALPHA_TEST);
 
         PspVertexColor2D *v = g_temp_col_verts;
         v[0].color = col; v[0].x = x0; v[0].y = y0; v[0].z = 0;
@@ -1158,4 +1202,80 @@ void PspGpu_DrawOTagEnv(const uint32_t *ot, int count, const DRAWENV *env) {
         PspGpu_PutDrawEnv(env);
     }
     PspGpu_DrawOTag(ot, count);
+}
+
+/* ------------------------------------------------------------------------------
+ * PS1 Psy-Q Standard Function Exports
+ * ------------------------------------------------------------------------------
+ */
+
+int DrawSync(int mode) {
+    (void)mode;
+    if (g_psp_gpu.in_frame) {
+        sceKernelDcacheWritebackInvalidateAll();
+        sceGuFinish();
+        sceGuSync(0, 0);
+        g_psp_gpu.in_frame = 0;
+    }
+    return 0;
+}
+
+int VSync(int mode) {
+    (void)mode;
+    if (g_psp_gpu.in_frame) {
+        sceKernelDcacheWritebackInvalidateAll();
+        sceGuFinish();
+        sceGuSync(0, 0);
+        g_psp_gpu.in_frame = 0;
+    }
+    sceDisplayWaitVblankStart();
+    g_psp_gpu.disp_buffer = g_psp_gpu.draw_buffer;
+    g_psp_gpu.draw_buffer = sceGuSwapBuffers();
+    g_psp_gpu.frame_counter++;
+    return 0;
+}
+
+int ResetGraph(int mode) {
+    (void)mode;
+    PspGpu_Reset();
+    return 0;
+}
+
+int SetDispMask(int mask) {
+    PspGpu_SetDispMask(mask);
+    return 0;
+}
+
+int LoadImage(const RECT *rect, const void *pixels) {
+    return PspGpu_LoadImage(rect, pixels);
+}
+
+int StoreImage(const RECT *rect, void *pixels) {
+    return PspGpu_StoreImage(rect, pixels);
+}
+
+int MoveImage(const RECT *src, int dst_x, int dst_y) {
+    return PspGpu_MoveImage(src, dst_x, dst_y);
+}
+
+void ClearImage(const RECT *rect, uint8_t r, uint8_t g, uint8_t b) {
+    PspGpu_ClearImage(rect, r, g, b);
+}
+
+DRAWENV *PutDrawEnv(const DRAWENV *env) {
+    return PspGpu_PutDrawEnv(env);
+}
+
+DISPENV *PutDispEnv(const DISPENV *env) {
+    return PspGpu_PutDispEnv(env);
+}
+
+void DrawOTag(const uint32_t *ot) {
+    PspGpu_DrawOTag(ot, 4096);
+}
+
+void DrawPrim(const void *p) {
+    if (p) {
+        PspGpu_ExecuteSinglePrim((const uint32_t *)p);
+    }
 }
