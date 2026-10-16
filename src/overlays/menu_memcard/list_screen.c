@@ -166,7 +166,7 @@ void MenuCard_ShowLogoFade(void) {
     SetDispMask(1);
 
 #if defined(__psp__) || defined(ENABLE_PSP)
-    int max_logo_frames = (getenv("PE_AUTOTEST") != NULL) ? 8 : 90;
+    int max_logo_frames = 90;
     for (i = 0; i < max_logo_frames; i++) {
         page = g_MemcardScreenPage == 0;
         g_MemcardScreenPage = page;

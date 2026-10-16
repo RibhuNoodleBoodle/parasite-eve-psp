@@ -1677,6 +1677,9 @@ int PspStr_DecodeFrame(const uint8_t *str_chunk_stream, size_t total_bytes,
     }
 
     s_mdec.decoded_frames++;
+    if (s_decdct_out_callback) {
+        s_decdct_out_callback();
+    }
     return 1;
 }
 
@@ -1753,6 +1756,15 @@ int PspStr_StreamVideo(uint32_t start_lba, uint32_t sector_count,
 
                 /* Complete frame assembled */
                 if (chunk_idx + 1u == num_chunks && frame_bytes > 0) {
+                    /* Check for user skip request */
+                    PspInput_Poll();
+                    uint16_t btns = PspInput_GetButtons();
+                    if (btns & (HOST_PAD_START | HOST_PAD_CROSS)) {
+                        fprintf(stderr, "[PSP_STR] Video skip requested by button press (0x%04X) at frame %u\n",
+                                btns, (unsigned)frames_rendered);
+                        break;
+                    }
+
                     /* 1. Unpack Huffman VLC stream into RLE buffer */
                     memset(rle_buffer, 0, sizeof(rle_buffer));
                     DecDCTvlcSize2(0);
@@ -1786,5 +1798,5 @@ int PspStr_StreamVideo(uint32_t start_lba, uint32_t sector_count,
     PutDispEnv(&env_end);
 
     fprintf(stderr, "[PSP_STR] Video stream finished: %u frames rendered\n", (unsigned)frames_rendered);
-    return 1;
+    return (current_lba < end_lba) ? 1 : 0;
 }

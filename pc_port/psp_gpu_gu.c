@@ -1542,6 +1542,30 @@ int VSync(int mode) {
                 psp_write_ppm_screenshot("ms0:/frame_dump_logo.ppm", edram_disp);
                 psp_write_ppm_screenshot("frame_dump_logo.ppm", edram_disp);
             }
+            if (g_psp_gpu.frame_counter >= 340 && g_psp_gpu.frame_counter <= 360) {
+                static int s_dumped_intro = 0;
+                if (!s_dumped_intro) {
+                    s_dumped_intro = 1;
+                    psp_write_ppm_screenshot("ms0:/frame_dump_intro_fmv.ppm", edram_disp);
+                    psp_write_ppm_screenshot("frame_dump_intro_fmv.ppm", edram_disp);
+                }
+            }
+            if (g_psp_gpu.frame_counter >= 475 && g_psp_gpu.frame_counter <= 490) {
+                static int s_dumped_title = 0;
+                if (!s_dumped_title) {
+                    s_dumped_title = 1;
+                    psp_write_ppm_screenshot("ms0:/frame_dump_title.ppm", edram_disp);
+                    psp_write_ppm_screenshot("frame_dump_title.ppm", edram_disp);
+                }
+            }
+            if (g_psp_gpu.frame_counter >= 560 && g_psp_gpu.frame_counter <= 600) {
+                static int s_dumped_newgame = 0;
+                if (!s_dumped_newgame) {
+                    s_dumped_newgame = 1;
+                    psp_write_ppm_screenshot("ms0:/frame_dump_newgame.ppm", edram_disp);
+                    psp_write_ppm_screenshot("frame_dump_newgame.ppm", edram_disp);
+                }
+            }
             if (is_carnegie && disp_nonblack > 0) {
                 static int s_dumped_carnegie = 0;
                 if (!s_dumped_carnegie) {

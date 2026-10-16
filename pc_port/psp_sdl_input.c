@@ -205,15 +205,22 @@ void PspInput_Poll(void)
     }
 
     if (s_autotest == 1) {
-        if (s_poll_counter >= 70 && s_poll_counter <= 85) {
+        /*
+         * Staged Auto-Input Timeline:
+         * Frame 1..419: Zero synthetic input (Square EA notice & Intro FMV stream freely).
+         * Frame 420..425: Single START pulse to skip Intro FMV to Title screen.
+         * Frame 426..519: Zero synthetic input (Title screen displays).
+         * Frame 520..530: Single CROSS pulse to confirm NEW GAME.
+         */
+        if (s_poll_counter >= 420 && s_poll_counter <= 425) {
             buttons |= HOST_PAD_START;
-            if (s_poll_counter == 70) {
-                fprintf(stderr, "[NEW-GAME-TRACE] Auto-input: START injected (frame %u)\n", (unsigned)s_poll_counter);
+            if (s_poll_counter == 420) {
+                fprintf(stderr, "[NEW-GAME-TRACE] Auto-input: START injected to skip Intro FMV (frame %u)\n", (unsigned)s_poll_counter);
             }
         }
-        if (s_poll_counter >= 160 && s_poll_counter <= 320) {
+        if (s_poll_counter >= 520 && s_poll_counter <= 530) {
             buttons |= HOST_PAD_CROSS;
-            if (s_poll_counter == 160) {
+            if (s_poll_counter == 520) {
                 fprintf(stderr, "[NEW-GAME-TRACE] Auto-input: CROSS injected for NEW GAME (frame %u)\n", (unsigned)s_poll_counter);
             }
         }

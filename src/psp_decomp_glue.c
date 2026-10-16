@@ -290,7 +290,7 @@ void Boot_RunFrame(void) {
             s_prologue_inited = 1;
             fprintf(stderr, "[NEW-GAME-TRACE] Dispatching New Game prologue scene (0xA80830C8) -> FMV002 Opera Opening\n");
             /* Stream authentic FMV002 Opera Opening movie from Disc 1 LBA 103206 */
-            PspStr_StreamVideo(103206, 30, NULL, 320, 240, 0);
+            PspStr_StreamVideo(103206, 10232, NULL, 320, 240, 0);
         }
         /* Step the prologue: after initial movie playback, transition to Carnegie Hall */
         g_SceneDispatchToken = 0xA8000148;
@@ -385,8 +385,7 @@ int MenuCard_PlayVideo(int vid) {
     if (start_lba > 0) {
         fprintf(stderr, "[PE-PSP] MenuCard_PlayVideo(%d) -> streaming movie from LBA %u (%u sectors)\n",
                 vid, (unsigned)start_lba, (unsigned)sector_count);
-        /* Stream 30 sectors (~3-4 frames) for fast responsive test progression */
-        PspStr_StreamVideo(start_lba, (sector_count > 30) ? 30 : sector_count, NULL, 320, 240, 0);
+        return PspStr_StreamVideo(start_lba, sector_count, NULL, 320, 240, 0);
     }
     return 0;
 }
