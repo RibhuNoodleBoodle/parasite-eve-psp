@@ -9,6 +9,9 @@
 #include "psp_sdl_input.h"
 
 #include <SDL/SDL.h>
+#if defined(__psp__) || defined(ENABLE_PSP)
+#include <pspctrl.h>
+#endif
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -16,6 +19,7 @@
 /* Internal State */
 static SDL_Joystick *s_joystick = NULL;
 static int           s_input_initialized = 0;
+static uint8_t      *s_pad_direct_buf[2] = {NULL, NULL};
 
 static uint16_t      s_held_buttons = 0;   /* Active-high PS1 button mask */
 static uint16_t      s_pad_word     = 0xFFFFu; /* Active-low PS1 pad word */
@@ -27,14 +31,18 @@ static uint8_t       s_analog_ly    = 128;
 
 int PspInput_Init(void)
 {
-    if (s_input_initialized && s_joystick) {
+    if (s_input_initialized) {
         return 1;
     }
+
+#if defined(__psp__) || defined(ENABLE_PSP)
+    sceCtrlSetSamplingCycle(0);
+    sceCtrlSetSamplingMode(PSP_CTRL_MODE_ANALOG);
+#endif
 
     if (!SDL_WasInit(SDL_INIT_JOYSTICK)) {
         if (SDL_InitSubSystem(SDL_INIT_JOYSTICK) < 0) {
             fprintf(stderr, "[PSP_INPUT] Failed to init SDL joystick: %s\n", SDL_GetError());
-            return 0;
         }
     }
 
@@ -47,11 +55,7 @@ int PspInput_Init(void)
                     SDL_JoystickName(0),
                     SDL_JoystickNumAxes(s_joystick),
                     SDL_JoystickNumButtons(s_joystick));
-        } else {
-            fprintf(stderr, "[PSP_INPUT] Warning: Failed to open joystick 0: %s\n", SDL_GetError());
         }
-    } else {
-        fprintf(stderr, "[PSP_INPUT] Warning: No joysticks detected by SDL\n");
     }
 
     s_held_buttons = 0;
@@ -91,42 +95,49 @@ void PspInput_Poll(void)
     }
 
     /* Pump SDL events / update joystick state */
-    SDL_JoystickUpdate();
-
-    if (!s_joystick) {
-        s_held_buttons = 0;
-        s_pad_word = 0xFFFFu;
-        s_hotkeys = 0;
-        return;
+    if (s_joystick) {
+        SDL_JoystickUpdate();
     }
 
-    /*
-     * PSP Button indices in SDL 1.2:
-     *   0: Triangle
-     *   1: Circle
-     *   2: Cross
-     *   3: Square
-     *   4: L-Trigger
-     *   5: R-Trigger
-     *   6: Down
-     *   7: Left
-     *   8: Up
-     *   9: Right
-     *  10: Select
-     *  11: Start
-     */
-    uint8_t btn_triangle = SDL_JoystickGetButton(s_joystick, 0);
-    uint8_t btn_circle   = SDL_JoystickGetButton(s_joystick, 1);
-    uint8_t btn_cross    = SDL_JoystickGetButton(s_joystick, 2);
-    uint8_t btn_square   = SDL_JoystickGetButton(s_joystick, 3);
-    uint8_t btn_l        = SDL_JoystickGetButton(s_joystick, 4);
-    uint8_t btn_r        = SDL_JoystickGetButton(s_joystick, 5);
-    uint8_t btn_down     = SDL_JoystickGetButton(s_joystick, 6);
-    uint8_t btn_left     = SDL_JoystickGetButton(s_joystick, 7);
-    uint8_t btn_up       = SDL_JoystickGetButton(s_joystick, 8);
-    uint8_t btn_right    = SDL_JoystickGetButton(s_joystick, 9);
-    uint8_t btn_select   = SDL_JoystickGetButton(s_joystick, 10);
-    uint8_t btn_start    = SDL_JoystickGetButton(s_joystick, 11);
+    uint8_t btn_triangle = s_joystick ? SDL_JoystickGetButton(s_joystick, 0) : 0;
+    uint8_t btn_circle   = s_joystick ? SDL_JoystickGetButton(s_joystick, 1) : 0;
+    uint8_t btn_cross    = s_joystick ? SDL_JoystickGetButton(s_joystick, 2) : 0;
+    uint8_t btn_square   = s_joystick ? SDL_JoystickGetButton(s_joystick, 3) : 0;
+    uint8_t btn_l        = s_joystick ? SDL_JoystickGetButton(s_joystick, 4) : 0;
+    uint8_t btn_r        = s_joystick ? SDL_JoystickGetButton(s_joystick, 5) : 0;
+    uint8_t btn_down     = s_joystick ? SDL_JoystickGetButton(s_joystick, 6) : 0;
+    uint8_t btn_left     = s_joystick ? SDL_JoystickGetButton(s_joystick, 7) : 0;
+    uint8_t btn_up       = s_joystick ? SDL_JoystickGetButton(s_joystick, 8) : 0;
+    uint8_t btn_right    = s_joystick ? SDL_JoystickGetButton(s_joystick, 9) : 0;
+    uint8_t btn_select   = s_joystick ? SDL_JoystickGetButton(s_joystick, 10) : 0;
+    uint8_t btn_start    = s_joystick ? SDL_JoystickGetButton(s_joystick, 11) : 0;
+
+    s_raw_axis_x = s_joystick ? SDL_JoystickGetAxis(s_joystick, 0) : 0;
+    s_raw_axis_y = s_joystick ? SDL_JoystickGetAxis(s_joystick, 1) : 0;
+
+#if defined(__psp__) || defined(ENABLE_PSP)
+    SceCtrlData ctrl;
+    memset(&ctrl, 0, sizeof(ctrl));
+    if (sceCtrlPeekBufferPositive(&ctrl, 1) > 0) {
+        if (ctrl.Buttons & PSP_CTRL_TRIANGLE) btn_triangle = 1;
+        if (ctrl.Buttons & PSP_CTRL_CIRCLE)   btn_circle   = 1;
+        if (ctrl.Buttons & PSP_CTRL_CROSS)    btn_cross    = 1;
+        if (ctrl.Buttons & PSP_CTRL_SQUARE)   btn_square   = 1;
+        if (ctrl.Buttons & PSP_CTRL_LTRIGGER) btn_l        = 1;
+        if (ctrl.Buttons & PSP_CTRL_RTRIGGER) btn_r        = 1;
+        if (ctrl.Buttons & PSP_CTRL_DOWN)     btn_down     = 1;
+        if (ctrl.Buttons & PSP_CTRL_LEFT)     btn_left     = 1;
+        if (ctrl.Buttons & PSP_CTRL_UP)       btn_up       = 1;
+        if (ctrl.Buttons & PSP_CTRL_RIGHT)    btn_right    = 1;
+        if (ctrl.Buttons & PSP_CTRL_SELECT)   btn_select   = 1;
+        if (ctrl.Buttons & PSP_CTRL_START)    btn_start    = 1;
+
+        int16_t hw_ax = (int16_t)(((int)ctrl.Lx - 128) * 256);
+        int16_t hw_ay = (int16_t)(((int)ctrl.Ly - 128) * 256);
+        if (hw_ax < -4096 || hw_ax > 4096) s_raw_axis_x = hw_ax;
+        if (hw_ay < -4096 || hw_ay > 4096) s_raw_axis_y = hw_ay;
+    }
+#endif
 
     /* 1. Map Face Buttons and D-Pad */
     if (btn_triangle) buttons |= HOST_PAD_TRIANGLE;
@@ -183,9 +194,6 @@ void PspInput_Poll(void)
      * - Threshold against deadzone for digital movement in menus/gameplay.
      * - Convert to 8-bit unsigned integer (0..255, 128 center) for PS1 packet.
      */
-    s_raw_axis_x = SDL_JoystickGetAxis(s_joystick, 0);
-    s_raw_axis_y = SDL_JoystickGetAxis(s_joystick, 1);
-
     if (s_raw_axis_x <= -HOST_PAD_STICK_DEADZONE) buttons |= HOST_PAD_LEFT;
     if (s_raw_axis_x >=  HOST_PAD_STICK_DEADZONE) buttons |= HOST_PAD_RIGHT;
     if (s_raw_axis_y <= -HOST_PAD_STICK_DEADZONE) buttons |= HOST_PAD_UP;
@@ -199,6 +207,16 @@ void PspInput_Poll(void)
     s_held_buttons = buttons;
     s_pad_word     = (uint16_t)~buttons; /* Active-low PS1 pad word */
     s_hotkeys      = hotkeys;
+
+    if (s_pad_direct_buf[0]) {
+        PspPadPacket pkt;
+        PspInput_GetPacket(&pkt);
+        memcpy(s_pad_direct_buf[0], &pkt, sizeof(pkt));
+    }
+    if (s_pad_direct_buf[1]) {
+        s_pad_direct_buf[1][0] = 0xFF; /* Port 2 disconnected */
+        s_pad_direct_buf[1][1] = 0xFF;
+    }
 }
 
 uint16_t PspInput_GetButtons(void)
@@ -267,19 +285,21 @@ uint16_t HostWindow_PadRaw(void)
     return s_pad_word;
 }
 
-static uint8_t *s_pad_direct_buf[2] = {NULL, NULL};
-
 void PadInitDirect(unsigned char *pad1, unsigned char *pad2) {
     s_pad_direct_buf[0] = pad1;
     s_pad_direct_buf[1] = pad2;
     PspInput_Init();
+    PspInput_Poll();
 }
 
 void PadStartCom(void) {}
 
 int PadGetState(int port) {
-    (void)port;
-    return 6; /* PadStateStable */
+    if (port == 0) {
+        PspInput_Poll();
+        return 6; /* PadStateStable */
+    }
+    return 0;
 }
 
 int PadInfoMode(int port, int term, int offs) {

@@ -272,7 +272,23 @@ void Draw_PresentFrame(void) {
 
 s32 Draw_RemapStatusFlags(void) {
     PspInput_Poll();
-    return (s32)PspInput_GetButtons();
+    uint16_t raw = PspInput_GetButtons();
+    s32 mask = 0;
+    if (raw & HOST_PAD_UP)       mask |= 0x1000;
+    if (raw & HOST_PAD_DOWN)     mask |= 0x4000;
+    if (raw & HOST_PAD_LEFT)     mask |= 0x8000;
+    if (raw & HOST_PAD_RIGHT)    mask |= 0x2000;
+    if (raw & HOST_PAD_CROSS)    mask |= 0x20;
+    if (raw & HOST_PAD_CIRCLE)   mask |= 0x40;
+    if (raw & HOST_PAD_SQUARE)   mask |= 0x10;
+    if (raw & HOST_PAD_TRIANGLE) mask |= 0x80;
+    if (raw & HOST_PAD_L1)       mask |= 0x4;
+    if (raw & HOST_PAD_R1)       mask |= 0x8;
+    if (raw & HOST_PAD_L2)       mask |= 0x1;
+    if (raw & HOST_PAD_R2)       mask |= 0x2;
+    if (raw & HOST_PAD_SELECT)   mask |= 0x100;
+    if (raw & HOST_PAD_START)    mask |= 0x800;
+    return mask;
 }
 
 void Draw_ResetTextboxes(void) {}

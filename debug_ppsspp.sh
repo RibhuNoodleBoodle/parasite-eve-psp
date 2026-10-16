@@ -104,12 +104,16 @@ EOF
 echo ""
 echo "=== [Step 3] Running Portable PPSSPP AppImage (12s timeout) ==="
 rm -f "$LOG_FILE" "$PPSSPP_DIR/ probe"*.log 2>/dev/null || true
+touch "$ROOT_DIR/dist/PSP/GAME/ParasiteEve/frame_dump_enable.flag" 2>/dev/null || true
+touch "$MEMSTICK_GAME_DIR/frame_dump_enable.flag" 2>/dev/null || true
 
 if [[ -x "$APPIMAGE_BIN" ]]; then
     HOME="$(pwd)/.ppsspp" timeout 12s ./.ppsspp/*.AppImage --appimage-extract-and-run -v --log="$(pwd)/.ppsspp/ppsspp_debug.log" "$(pwd)/dist/PSP/GAME/ParasiteEve/EBOOT.PBP" || true
 else
     HOME="$(pwd)/.ppsspp" timeout 12s /lib64/ld-linux-x86-64.so.2 ./.ppsspp/*.AppImage --appimage-extract-and-run -v --log="$(pwd)/.ppsspp/ppsspp_debug.log" "$(pwd)/dist/PSP/GAME/ParasiteEve/EBOOT.PBP" || true
 fi
+
+rm -f "$ROOT_DIR/dist/PSP/GAME/ParasiteEve/frame_dump_enable.flag" "$MEMSTICK_GAME_DIR/frame_dump_enable.flag" 2>/dev/null || true
 
 # Sync frame_dump.ppm and frame_dump_logo.ppm into .ppsspp/, dist/, and project root if written via ms0:/ or host0:/
 for ppm_name in "frame_dump.ppm" "frame_dump_logo.ppm"; do

@@ -1490,57 +1490,73 @@ int VSync(int mode) {
             if (g_ps1_vram[p] != 0) vram_nonzero++;
         }
 
-        uint16_t *edram_disp = (uint16_t *)((uintptr_t)0x44000000u + (uintptr_t)g_psp_gpu.disp_buffer);
-        uint32_t disp_nonblack = 0;
-
-        /* Populate the 480x272 CPU EDRAM display buffer with the current frame's
-         * 4:3 (362x272 at X=59..420) decoded DISPENV & SPRT output so both EDRAM
-         * telemetry and .ppm screenshot dumps reflect the exact rendered frame. */
-        int disp_w = (g_psp_gpu.current_dispenv.disp.w > 0) ? g_psp_gpu.current_dispenv.disp.w : 320;
-        int disp_h = (g_psp_gpu.current_dispenv.disp.h > 0) ? g_psp_gpu.current_dispenv.disp.h : 240;
-        for (int y = 0; y < PSP_SCREEN_HEIGHT; y++) {
-            int src_y = (y * disp_h) / PSP_SCREEN_HEIGHT;
-            for (int x = 0; x < PSP_SCREEN_WIDTH; x++) {
-                uint16_t out_pix = 0x8000u;
-                if (x >= 59 && x < 59 + 362) {
-                    int src_x = ((x - 59) * disp_w) / 362;
-                    out_pix = s_dispenv_tex[src_y * 512 + src_x];
-                    if (s_last_sprt_frame + 1 >= g_psp_gpu.frame_counter &&
-                        x >= s_last_sprt_x0 && x < s_last_sprt_x1 &&
-                        y >= s_last_sprt_y0 && y < s_last_sprt_y1 &&
-                        s_last_sprt_x1 > s_last_sprt_x0 && s_last_sprt_y1 > s_last_sprt_y0) {
-                        int u = s_last_sprt_u + ((x - s_last_sprt_x0) * s_last_sprt_w) / (s_last_sprt_x1 - s_last_sprt_x0);
-                        int v = s_last_sprt_v + ((y - s_last_sprt_y0) * s_last_sprt_h) / (s_last_sprt_y1 - s_last_sprt_y0);
-                        uint16_t spr_pix = s_decoded_tpage[(v & 0x1FF) * 512 + (u & 0x1FF)];
-                        if ((spr_pix & 0x7FFFu) != 0) {
-                            out_pix = spr_pix;
-                        }
-                    }
-                }
-                edram_disp[y * PSP_BUFFER_STRIDE + x] = out_pix;
-                if ((out_pix & 0x7FFFu) != 0) {
-                    disp_nonblack++;
-                }
+        static int s_dump_checked = 0;
+        static int s_enable_frame_dump = 0;
+        if (!s_dump_checked) {
+            s_dump_checked = 1;
+            SceUID fd = sceIoOpen("frame_dump_enable.flag", PSP_O_RDONLY, 0777);
+            if (fd < 0) {
+                fd = sceIoOpen("ms0:/PSP/GAME/ParasiteEve/frame_dump_enable.flag", PSP_O_RDONLY, 0777);
+            }
+            if (fd >= 0) {
+                s_enable_frame_dump = 1;
+                sceIoClose(fd);
             }
         }
 
-        char log_buf[192];
-        int log_len = snprintf(log_buf, sizeof(log_buf),
-            "[VRAM-CHECK] Frame %u: Non-zero texels: %u, Display non-black pixels: %u, OT primitives drawn: %u\n",
-            (unsigned int)g_psp_gpu.frame_counter,
-            (unsigned int)vram_nonzero,
-            (unsigned int)disp_nonblack,
-            (unsigned int)g_psp_gpu.primitives_drawn);
-        if (log_len > 0) {
-            sceIoWrite(2, log_buf, (SceSize)log_len);
-        }
+        if (s_enable_frame_dump && g_psp_gpu.frame_counter <= 240) {
+            uint16_t *edram_disp = (uint16_t *)((uintptr_t)0x44000000u + (uintptr_t)g_psp_gpu.disp_buffer);
+            uint32_t disp_nonblack = 0;
 
-        if (g_psp_gpu.frame_counter == 60) {
-            psp_write_ppm_screenshot("ms0:/frame_dump_logo.ppm", edram_disp);
-            psp_write_ppm_screenshot("frame_dump_logo.ppm", edram_disp);
+            /* Populate the 480x272 CPU EDRAM display buffer with the current frame's
+             * 4:3 (362x272 at X=59..420) decoded DISPENV & SPRT output so both EDRAM
+             * telemetry and .ppm screenshot dumps reflect the exact rendered frame. */
+            int disp_w = (g_psp_gpu.current_dispenv.disp.w > 0) ? g_psp_gpu.current_dispenv.disp.w : 320;
+            int disp_h = (g_psp_gpu.current_dispenv.disp.h > 0) ? g_psp_gpu.current_dispenv.disp.h : 240;
+            for (int y = 0; y < PSP_SCREEN_HEIGHT; y++) {
+                int src_y = (y * disp_h) / PSP_SCREEN_HEIGHT;
+                for (int x = 0; x < PSP_SCREEN_WIDTH; x++) {
+                    uint16_t out_pix = 0x8000u;
+                    if (x >= 59 && x < 59 + 362) {
+                        int src_x = ((x - 59) * disp_w) / 362;
+                        out_pix = s_dispenv_tex[src_y * 512 + src_x];
+                        if (s_last_sprt_frame + 1 >= g_psp_gpu.frame_counter &&
+                            x >= s_last_sprt_x0 && x < s_last_sprt_x1 &&
+                            y >= s_last_sprt_y0 && y < s_last_sprt_y1 &&
+                            s_last_sprt_x1 > s_last_sprt_x0 && s_last_sprt_y1 > s_last_sprt_y0) {
+                            int u = s_last_sprt_u + ((x - s_last_sprt_x0) * s_last_sprt_w) / (s_last_sprt_x1 - s_last_sprt_x0);
+                            int v = s_last_sprt_v + ((y - s_last_sprt_y0) * s_last_sprt_h) / (s_last_sprt_y1 - s_last_sprt_y0);
+                            uint16_t spr_pix = s_decoded_tpage[(v & 0x1FF) * 512 + (u & 0x1FF)];
+                            if ((spr_pix & 0x7FFFu) != 0) {
+                                out_pix = spr_pix;
+                            }
+                        }
+                    }
+                    edram_disp[y * PSP_BUFFER_STRIDE + x] = out_pix;
+                    if ((out_pix & 0x7FFFu) != 0) {
+                        disp_nonblack++;
+                    }
+                }
+            }
+
+            char log_buf[192];
+            int log_len = snprintf(log_buf, sizeof(log_buf),
+                "[VRAM-CHECK] Frame %u: Non-zero texels: %u, Display non-black pixels: %u, OT primitives drawn: %u\n",
+                (unsigned int)g_psp_gpu.frame_counter,
+                (unsigned int)vram_nonzero,
+                (unsigned int)disp_nonblack,
+                (unsigned int)g_psp_gpu.primitives_drawn);
+            if (log_len > 0) {
+                sceIoWrite(2, log_buf, (SceSize)log_len);
+            }
+
+            if (g_psp_gpu.frame_counter == 60) {
+                psp_write_ppm_screenshot("ms0:/frame_dump_logo.ppm", edram_disp);
+                psp_write_ppm_screenshot("frame_dump_logo.ppm", edram_disp);
+            }
+            psp_write_ppm_screenshot("ms0:/frame_dump.ppm", edram_disp);
+            psp_write_ppm_screenshot("frame_dump.ppm", edram_disp);
         }
-        psp_write_ppm_screenshot("ms0:/frame_dump.ppm", edram_disp);
-        psp_write_ppm_screenshot("frame_dump.ppm", edram_disp);
     }
 
     if (s_vsync_callback) {
