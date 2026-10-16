@@ -229,3 +229,4 @@ SAVEDATA/
 
 # Portable PPSSPP test runner and emulator directory
 .ppsspp/
+*.ppm

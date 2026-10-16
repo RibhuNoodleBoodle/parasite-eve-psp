@@ -111,17 +111,22 @@ else
     HOME="$(pwd)/.ppsspp" timeout 12s /lib64/ld-linux-x86-64.so.2 ./.ppsspp/*.AppImage --appimage-extract-and-run -v --log="$(pwd)/.ppsspp/ppsspp_debug.log" "$(pwd)/dist/PSP/GAME/ParasiteEve/EBOOT.PBP" || true
 fi
 
-# Sync frame_dump.ppm into .ppsspp/frame_dump.ppm if written via ms0:/ or host0:/
-for candidate_ppm in \
-    "$PPSSPP_DIR/.config/ppsspp/frame_dump.ppm" \
-    "$PPSSPP_DIR/.config/ppsspp/PSP/GAME/ParasiteEve/frame_dump.ppm" \
-    "$ROOT_DIR/dist/frame_dump.ppm" \
-    "$ROOT_DIR/dist/PSP/GAME/ParasiteEve/frame_dump.ppm"; do
-    if [[ -f "$candidate_ppm" ]]; then
-        cp -f "$candidate_ppm" "$PPSSPP_DIR/frame_dump.ppm"
-        break
-    fi
+# Sync frame_dump.ppm and frame_dump_logo.ppm into .ppsspp/, dist/, and project root if written via ms0:/ or host0:/
+for ppm_name in "frame_dump.ppm" "frame_dump_logo.ppm"; do
+    for candidate_ppm in \
+        "$PPSSPP_DIR/.config/ppsspp/$ppm_name" \
+        "$PPSSPP_DIR/.config/ppsspp/PSP/GAME/ParasiteEve/$ppm_name" \
+        "$ROOT_DIR/dist/$ppm_name" \
+        "$ROOT_DIR/dist/PSP/GAME/ParasiteEve/$ppm_name"; do
+        if [[ -f "$candidate_ppm" ]]; then
+            cp -f "$candidate_ppm" "$PPSSPP_DIR/$ppm_name"
+            cp -f "$candidate_ppm" "$ROOT_DIR/dist/PSP/GAME/ParasiteEve/$ppm_name"
+            cp -f "$candidate_ppm" "$ROOT_DIR/$ppm_name"
+            break
+        fi
+    done
 done
+
 
 echo ""
 echo "=== [Step 4] Automated Telemetry & Log Analysis ==="

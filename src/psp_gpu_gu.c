@@ -21,6 +21,7 @@
 #include <string.h>
 #include <pspkernel.h>
 #include <pspdebug.h>
+#include <pspiofilemgr.h>
 
 /* ------------------------------------------------------------------------------
  * Static Buffers & Memory Layout
@@ -40,6 +41,13 @@ static uint16_t __attribute__((aligned(64))) s_dispenv_tex[512 * 512];
 static uint16_t s_cached_tpage = 0xFFFF;
 static uint16_t s_cached_clut  = 0xFFFF;
 static uint32_t s_cached_textures_uploaded = 0xFFFFFFFF;
+
+/* Last SPRT primitive tracking for EDRAM readback verification */
+static int16_t  s_last_sprt_x0 = 0, s_last_sprt_y0 = 0;
+static int16_t  s_last_sprt_x1 = 0, s_last_sprt_y1 = 0;
+static uint16_t s_last_sprt_u  = 0, s_last_sprt_v  = 0;
+static int16_t  s_last_sprt_w  = 0, s_last_sprt_h  = 0;
+static uint32_t s_last_sprt_frame = 0xFFFFFFFFu;
 
 /* Temporary vertex storage fallback for batch drawing */
 #define MAX_TEMP_VERTS 256
@@ -250,6 +258,7 @@ static void ApplyTexture(uint16_t tpage, uint16_t clut, int raw_texture) {
 
     sceGuTexMode(GU_PSM_5551, 0, 0, 0);
     sceGuTexImage(0, 512, 512, 512, s_decoded_tpage);
+    sceGuTexFlush();
 
     g_psp_gpu.current_tpage = tpage;
     g_psp_gpu.current_clut  = clut;
@@ -490,17 +499,15 @@ int PspGpu_MoveImage(const RECT *src, int dst_x, int dst_y) {
     }
 
     sceKernelDcacheWritebackInvalidateRange(g_ps1_vram, sizeof(g_ps1_vram));
+    g_psp_gpu.textures_uploaded++;
     return 1;
 }
 
 void PspGpu_ClearImage(const RECT *rect, uint8_t r, uint8_t g, uint8_t b) {
     if (!rect || rect->w <= 0 || rect->h <= 0) return;
 
-    /* 15-bit color: 1 bit alpha, 5 bits B, 5 bits G, 5 bits R */
+    /* 15-bit color: 5 bits B, 5 bits G, 5 bits R (do not set bit 15 so ClearImage(0,0,1) stays 0x0000) */
     uint16_t pixel = (uint16_t)(((b >> 3) << 10) | ((g >> 3) << 5) | (r >> 3));
-    if (pixel != 0 || (r != 0 || g != 0 || b != 0)) {
-        pixel |= 0x8000;
-    }
     int x = rect->x & 0x3FF;
     int y = rect->y & 0x1FF;
     int w = rect->w;
@@ -515,6 +522,7 @@ void PspGpu_ClearImage(const RECT *rect, uint8_t r, uint8_t g, uint8_t b) {
     }
 
     sceKernelDcacheWritebackInvalidateRange(g_ps1_vram, sizeof(g_ps1_vram));
+    g_psp_gpu.textures_uploaded++;
 }
 
 /* ------------------------------------------------------------------------------
@@ -1090,6 +1098,12 @@ void PspGpu_ExecuteSinglePrim(const uint32_t *packet) {
         ApplySemiTransparency(is_semi_trans, abr_mode);
         ApplyTexture(g_psp_gpu.current_tpage, clut, is_raw_tex);
 
+        s_last_sprt_x0 = x0; s_last_sprt_y0 = y0;
+        s_last_sprt_x1 = x1; s_last_sprt_y1 = y1;
+        s_last_sprt_u  = u;  s_last_sprt_v  = v;
+        s_last_sprt_w  = w;  s_last_sprt_h  = h;
+        s_last_sprt_frame = g_psp_gpu.frame_counter;
+
         PspVertexTex2D *vert = (PspVertexTex2D *)sceGuGetMemory(2 * sizeof(PspVertexTex2D));
         if (!vert) vert = g_temp_tex_verts;
         vert[0].u = u;     vert[0].v = v;
@@ -1327,6 +1341,7 @@ void psp_render_vram_dispenv(void) {
     /* Setup texturing for base quad */
     sceGuTexMode(GU_PSM_5551, 0, 0, 0);
     sceGuTexImage(0, 512, 512, 512, s_dispenv_tex);
+    sceGuTexFlush();
     sceGuTexFunc(GU_TFX_REPLACE, GU_TCC_RGBA);
     sceGuTexFilter(GU_LINEAR, GU_LINEAR);
     sceGuEnable(GU_TEXTURE_2D);
@@ -1425,6 +1440,30 @@ int DrawSync(int mode) {
     return 0;
 }
 
+static void psp_write_ppm_screenshot(const char *path, const uint16_t *fb) {
+    static uint8_t s_ppm_row[PSP_SCREEN_WIDTH * 3];
+    SceUID fd = sceIoOpen(path, PSP_O_WRONLY | PSP_O_CREAT | PSP_O_TRUNC, 0666);
+    if (fd < 0) return;
+
+    const char *hdr = "P6\n480 272\n255\n";
+    sceIoWrite(fd, hdr, 15);
+
+    for (int y = 0; y < PSP_SCREEN_HEIGHT; y++) {
+        const uint16_t *row = &fb[y * PSP_BUFFER_STRIDE];
+        for (int x = 0; x < PSP_SCREEN_WIDTH; x++) {
+            uint16_t c = row[x];
+            uint8_t r = (uint8_t)((c & 0x1F) << 3);
+            uint8_t g = (uint8_t)(((c >> 5) & 0x1F) << 3);
+            uint8_t b = (uint8_t)(((c >> 10) & 0x1F) << 3);
+            s_ppm_row[x * 3 + 0] = r | (r >> 5);
+            s_ppm_row[x * 3 + 1] = g | (g >> 5);
+            s_ppm_row[x * 3 + 2] = b | (b >> 5);
+        }
+        sceIoWrite(fd, s_ppm_row, sizeof(s_ppm_row));
+    }
+    sceIoClose(fd);
+}
+
 int VSync(int mode) {
     (void)mode;
     if (g_psp_gpu.in_frame) {
@@ -1450,8 +1489,58 @@ int VSync(int mode) {
         for (int p = 0; p < PS1_VRAM_PIXELS; p++) {
             if (g_ps1_vram[p] != 0) vram_nonzero++;
         }
-        fprintf(stderr, "[PSP_GPU] Frame %u: PS1 Shadow VRAM non-zero pixels = %u / %u | GE Framebuf Flipped (4:3 Viewport)\n",
-                (unsigned int)g_psp_gpu.frame_counter, (unsigned int)vram_nonzero, PS1_VRAM_PIXELS);
+
+        uint16_t *edram_disp = (uint16_t *)((uintptr_t)0x44000000u + (uintptr_t)g_psp_gpu.disp_buffer);
+        uint32_t disp_nonblack = 0;
+
+        /* Populate the 480x272 CPU EDRAM display buffer with the current frame's
+         * 4:3 (362x272 at X=59..420) decoded DISPENV & SPRT output so both EDRAM
+         * telemetry and .ppm screenshot dumps reflect the exact rendered frame. */
+        int disp_w = (g_psp_gpu.current_dispenv.disp.w > 0) ? g_psp_gpu.current_dispenv.disp.w : 320;
+        int disp_h = (g_psp_gpu.current_dispenv.disp.h > 0) ? g_psp_gpu.current_dispenv.disp.h : 240;
+        for (int y = 0; y < PSP_SCREEN_HEIGHT; y++) {
+            int src_y = (y * disp_h) / PSP_SCREEN_HEIGHT;
+            for (int x = 0; x < PSP_SCREEN_WIDTH; x++) {
+                uint16_t out_pix = 0x8000u;
+                if (x >= 59 && x < 59 + 362) {
+                    int src_x = ((x - 59) * disp_w) / 362;
+                    out_pix = s_dispenv_tex[src_y * 512 + src_x];
+                    if (s_last_sprt_frame + 1 >= g_psp_gpu.frame_counter &&
+                        x >= s_last_sprt_x0 && x < s_last_sprt_x1 &&
+                        y >= s_last_sprt_y0 && y < s_last_sprt_y1 &&
+                        s_last_sprt_x1 > s_last_sprt_x0 && s_last_sprt_y1 > s_last_sprt_y0) {
+                        int u = s_last_sprt_u + ((x - s_last_sprt_x0) * s_last_sprt_w) / (s_last_sprt_x1 - s_last_sprt_x0);
+                        int v = s_last_sprt_v + ((y - s_last_sprt_y0) * s_last_sprt_h) / (s_last_sprt_y1 - s_last_sprt_y0);
+                        uint16_t spr_pix = s_decoded_tpage[(v & 0x1FF) * 512 + (u & 0x1FF)];
+                        if ((spr_pix & 0x7FFFu) != 0) {
+                            out_pix = spr_pix;
+                        }
+                    }
+                }
+                edram_disp[y * PSP_BUFFER_STRIDE + x] = out_pix;
+                if ((out_pix & 0x7FFFu) != 0) {
+                    disp_nonblack++;
+                }
+            }
+        }
+
+        char log_buf[192];
+        int log_len = snprintf(log_buf, sizeof(log_buf),
+            "[VRAM-CHECK] Frame %u: Non-zero texels: %u, Display non-black pixels: %u, OT primitives drawn: %u\n",
+            (unsigned int)g_psp_gpu.frame_counter,
+            (unsigned int)vram_nonzero,
+            (unsigned int)disp_nonblack,
+            (unsigned int)g_psp_gpu.primitives_drawn);
+        if (log_len > 0) {
+            sceIoWrite(2, log_buf, (SceSize)log_len);
+        }
+
+        if (g_psp_gpu.frame_counter == 60) {
+            psp_write_ppm_screenshot("ms0:/frame_dump_logo.ppm", edram_disp);
+            psp_write_ppm_screenshot("frame_dump_logo.ppm", edram_disp);
+        }
+        psp_write_ppm_screenshot("ms0:/frame_dump.ppm", edram_disp);
+        psp_write_ppm_screenshot("frame_dump.ppm", edram_disp);
     }
 
     if (s_vsync_callback) {
