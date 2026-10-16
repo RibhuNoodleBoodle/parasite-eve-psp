@@ -287,3 +287,61 @@ int RotTransPers(const GteShortVector *v, int *sxy, int *p, int *flag) {
     return (int)PspGte_RotTransPers((const PspGteSVector *)v, (int32_t *)sxy, (int32_t *)p, (int32_t *)flag);
 }
 
+long RotTransPers3(void *v0, void *v1, void *v2, void *sxy0,
+                   void * volatile sxy1, void * volatile sxy2,
+                   void * volatile p, void * volatile flag) {
+    int32_t z0 = 0, z1 = 0, z2 = 0;
+    int32_t f0 = 0, f1 = 0, f2 = 0;
+    z0 = PspGte_RotTransPers((const PspGteSVector *)v0, (int32_t *)sxy0, &z0, &f0);
+    z1 = PspGte_RotTransPers((const PspGteSVector *)v1, (int32_t *)sxy1, &z1, &f1);
+    z2 = PspGte_RotTransPers((const PspGteSVector *)v2, (int32_t *)sxy2, &z2, &f2);
+    if (p) *(int32_t *)p = (z0 + z1 + z2) / 3;
+    if (flag) *(int32_t *)flag = f0 | f1 | f2;
+    return z2;
+}
+
+long RotTransPers4(void *v0, void *v1, void *v2, void *v3,
+                   void * volatile sxy0, void * volatile sxy1,
+                   void * volatile sxy2, void * volatile sxy3,
+                   void * volatile p, void * volatile flag) {
+    int32_t z0 = 0, z1 = 0, z2 = 0, z3 = 0;
+    int32_t f0 = 0, f1 = 0, f2 = 0, f3 = 0;
+    z0 = PspGte_RotTransPers((const PspGteSVector *)v0, (int32_t *)sxy0, &z0, &f0);
+    z1 = PspGte_RotTransPers((const PspGteSVector *)v1, (int32_t *)sxy1, &z1, &f1);
+    z2 = PspGte_RotTransPers((const PspGteSVector *)v2, (int32_t *)sxy2, &z2, &f2);
+    z3 = PspGte_RotTransPers((const PspGteSVector *)v3, (int32_t *)sxy3, &z3, &f3);
+    if (p) *(int32_t *)p = (z0 + z1 + z2 + z3) / 4;
+    if (flag) *(int32_t *)flag = f0 | f1 | f2 | f3;
+    return z3;
+}
+
+int32_t NormalClip(int32_t sxy0, int32_t sxy1, int32_t sxy2) {
+    return PspGte_NormalClip(sxy0, sxy1, sxy2);
+}
+
+int32_t AverageZ3(int32_t z0, int32_t z1, int32_t z2) {
+    int32_t otz = (z0 + z1 + z2) / 3;
+    if (otz >= 4096) otz = 4095;
+    if (otz <= 0) otz = 1;
+    return otz;
+}
+
+int32_t AverageZ4(int32_t z0, int32_t z1, int32_t z2, int32_t z3) {
+    int32_t otz = (z0 + z1 + z2 + z3) / 4;
+    if (otz >= 4096) otz = 4095;
+    if (otz <= 0) otz = 1;
+    return otz;
+}
+
+GteShortVector *ApplyMatrixSV(const GteMatrix *matrix,
+                            const GteShortVector *v, GteShortVector *out) {
+    PspGte_ApplyMatrixSV((const PspGteMatrix *)matrix, (const PspGteSVector *)v, (PspGteSVector *)out);
+    return out;
+}
+
+GteVector *ApplyMatrixLV(const GteMatrix *matrix, const GteVector *v,
+                         GteVector *out) {
+    PspGte_ApplyMatrixLV((const PspGteMatrix *)matrix, (const PspGteVector *)v, (PspGteVector *)out);
+    return out;
+}
+

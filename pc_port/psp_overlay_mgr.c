@@ -35,6 +35,23 @@ static struct {
 
 /* ── Subsystem Lifecycle ─────────────────────────────────────────────────────── */
 
+static int room_m005_theater_init(void *arena, size_t arena_sz) {
+    (void)arena; (void)arena_sz;
+    fprintf(stderr, "[PSP_OVERLAY] room_m005_theater initialized\n");
+    return 1;
+}
+
+static const PspOverlayDesc s_builtin_overlays[] = {
+    {
+        .name = "room_m005_theater",
+        .vma_start = 0x8018F000,
+        .vma_end = 0x8019F000,
+        .bss_size = 0x10000,
+        .init_fn = room_m005_theater_init,
+        .shutdown_fn = NULL,
+    },
+};
+
 int PspOverlay_Init(void)
 {
     if (s_ovl_mgr.initialized) {
@@ -47,6 +64,10 @@ int PspOverlay_Init(void)
     s_ovl_mgr.initialized = 1;
     fprintf(stderr, "[PSP_OVERLAY] Manager initialized (Shared Arena: %u KB at %p)\n",
             (unsigned)(PSP_OVERLAY_ARENA_SIZE / 1024u), (void *)s_overlay_arena);
+
+    for (size_t i = 0; i < sizeof(s_builtin_overlays)/sizeof(s_builtin_overlays[0]); i++) {
+        PspOverlay_Register(&s_builtin_overlays[i]);
+    }
 
     return 1;
 }

@@ -430,14 +430,14 @@ void Save_SetTitleStyleFlag(int flag) { (void)flag; }
 int Scene_LoadFieldBg(void) {
     if (!(g_GameState.flags & 1)) return 0;
     static uint8_t s_bg_buf[32 * 2048];
-    if (PspCdrom_ReadDiscSectors(g_PeImageBaseLba + 157, 0, s_bg_buf, 23) == 0) {
+    if (PspCdrom_ReadDiscSectors(g_PeImageBaseLba + 180, 0, s_bg_buf, 23) == 0) {
         for (size_t off = 0; off + 8 < 23 * 2048; off += 4) {
             if (s_bg_buf[off] == 0x10 && s_bg_buf[off+1] == 0x00 &&
                 s_bg_buf[off+2] == 0x00 && s_bg_buf[off+3] == 0x00) {
                 Asset_LoadTimImage((TimFile *)&s_bg_buf[off]);
             }
         }
-        fprintf(stderr, "[NEW-GAME-TRACE] Scene_LoadFieldBg: loaded field BG TIMs from PE.IMG sector 157\n");
+        fprintf(stderr, "[NEW-GAME-TRACE] Scene_LoadFieldBg: loaded field BG TIMs from PE.IMG sector 180\n");
     }
     PutDispEnv(&g_RenderDispEnvArray[g_ActiveDrawSlot]);
     SetDispMask(1);
