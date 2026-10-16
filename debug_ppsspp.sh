@@ -51,22 +51,25 @@ if [[ -f "$ROOT_DIR/EBOOT.PBP" ]]; then
 fi
 cp -f "$EBOOT_PATH" "$MEMSTICK_GAME_DIR/EBOOT.PBP"
 
-# Copy disc files into dist/PSP/GAME/ParasiteEve/disc/ only if not already present (no symlinks)
-if [[ -f "$ROOT_DIR/disc/PE_DISC1.bin" && ! -f "$ROOT_DIR/dist/PSP/GAME/ParasiteEve/disc/PE_DISC1.bin" ]]; then
-    echo "Copying PE_DISC1.bin to dist/PSP/GAME/ParasiteEve/disc/..."
-    cp -n "$ROOT_DIR/disc/PE_DISC1.bin" "$ROOT_DIR/dist/PSP/GAME/ParasiteEve/disc/PE_DISC1.bin"
-elif [[ -f "$ROOT_DIR/disc/PE_DISC1.BIN" && ! -f "$ROOT_DIR/dist/PSP/GAME/ParasiteEve/disc/PE_DISC1.BIN" ]]; then
-    echo "Copying PE_DISC1.BIN to dist/PSP/GAME/ParasiteEve/disc/..."
-    cp -n "$ROOT_DIR/disc/PE_DISC1.BIN" "$ROOT_DIR/dist/PSP/GAME/ParasiteEve/disc/PE_DISC1.BIN"
-fi
+# Copy disc files into dist/PSP/GAME/ParasiteEve/disc/ and portable memstick only if not already present (no symlinks)
+mkdir -p "$MEMSTICK_GAME_DIR/disc"
+for dst_disc_dir in "$ROOT_DIR/dist/PSP/GAME/ParasiteEve/disc" "$MEMSTICK_GAME_DIR/disc"; do
+    if [[ -f "$ROOT_DIR/disc/PE_DISC1.bin" && ! -f "$dst_disc_dir/PE_DISC1.bin" ]]; then
+        echo "Copying PE_DISC1.bin to $dst_disc_dir/..."
+        cp -f "$ROOT_DIR/disc/PE_DISC1.bin" "$dst_disc_dir/PE_DISC1.bin"
+    elif [[ -f "$ROOT_DIR/disc/PE_DISC1.BIN" && ! -f "$dst_disc_dir/PE_DISC1.BIN" ]]; then
+        echo "Copying PE_DISC1.BIN to $dst_disc_dir/..."
+        cp -f "$ROOT_DIR/disc/PE_DISC1.BIN" "$dst_disc_dir/PE_DISC1.BIN"
+    fi
 
-if [[ -f "$ROOT_DIR/disc/PE_DISC2.BIN" && ! -f "$ROOT_DIR/dist/PSP/GAME/ParasiteEve/disc/PE_DISC2.BIN" ]]; then
-    echo "Copying PE_DISC2.BIN to dist/PSP/GAME/ParasiteEve/disc/..."
-    cp -n "$ROOT_DIR/disc/PE_DISC2.BIN" "$ROOT_DIR/dist/PSP/GAME/ParasiteEve/disc/PE_DISC2.BIN"
-elif [[ -f "$ROOT_DIR/disc/PE_DISC2.bin" && ! -f "$ROOT_DIR/dist/PSP/GAME/ParasiteEve/disc/PE_DISC2.bin" ]]; then
-    echo "Copying PE_DISC2.bin to dist/PSP/GAME/ParasiteEve/disc/..."
-    cp -n "$ROOT_DIR/disc/PE_DISC2.bin" "$ROOT_DIR/dist/PSP/GAME/ParasiteEve/disc/PE_DISC2.bin"
-fi
+    if [[ -f "$ROOT_DIR/disc/PE_DISC2.BIN" && ! -f "$dst_disc_dir/PE_DISC2.BIN" ]]; then
+        echo "Copying PE_DISC2.BIN to $dst_disc_dir/..."
+        cp -f "$ROOT_DIR/disc/PE_DISC2.BIN" "$dst_disc_dir/PE_DISC2.BIN"
+    elif [[ -f "$ROOT_DIR/disc/PE_DISC2.bin" && ! -f "$dst_disc_dir/PE_DISC2.bin" ]]; then
+        echo "Copying PE_DISC2.bin to $dst_disc_dir/..."
+        cp -f "$ROOT_DIR/disc/PE_DISC2.bin" "$dst_disc_dir/PE_DISC2.bin"
+    fi
+done
 
 # Configure portable PPSSPP ppsspp.ini
 cat << EOF > "$INI_FILE"

@@ -184,28 +184,32 @@ static int cdrom_worker_thread(void *arg)
 static const char * const s_disc1_search_paths[] = {
     "disc/PE_DISC1.bin",
     "disc/PE_DISC1.BIN",
-    "ms0:/PSP/GAME/ParasiteEve/disc/PE_DISC1.bin",
-    "ms0:/PSP/GAME/ParasiteEve/disc/PE_DISC1.BIN",
     "./PE_DISC1.bin",
     "./PE_DISC1.BIN",
     "./disc/PE_DISC1.bin",
     "./disc/PE_DISC1.BIN",
-    "host0:/dist/PSP/GAME/ParasiteEve/disc/PE_DISC1.bin",
-    "host0:/dist/PSP/GAME/ParasiteEve/disc/PE_DISC1.BIN",
+    "ms0:/PSP/GAME/ParasiteEve/disc/PE_DISC1.bin",
+    "ms0:/PSP/GAME/ParasiteEve/disc/PE_DISC1.BIN",
+    "disc0:/disc/PE_DISC1.bin",
+    "disc0:/disc/PE_DISC1.BIN",
+    "host0:/disc/PE_DISC1.bin",
+    "host0:/disc/PE_DISC1.BIN",
     NULL
 };
 
 static const char * const s_disc2_search_paths[] = {
     "disc/PE_DISC2.bin",
     "disc/PE_DISC2.BIN",
-    "ms0:/PSP/GAME/ParasiteEve/disc/PE_DISC2.bin",
-    "ms0:/PSP/GAME/ParasiteEve/disc/PE_DISC2.BIN",
     "./PE_DISC2.bin",
     "./PE_DISC2.BIN",
     "./disc/PE_DISC2.bin",
     "./disc/PE_DISC2.BIN",
-    "host0:/dist/PSP/GAME/ParasiteEve/disc/PE_DISC2.bin",
-    "host0:/dist/PSP/GAME/ParasiteEve/disc/PE_DISC2.BIN",
+    "ms0:/PSP/GAME/ParasiteEve/disc/PE_DISC2.bin",
+    "ms0:/PSP/GAME/ParasiteEve/disc/PE_DISC2.BIN",
+    "disc0:/disc/PE_DISC2.bin",
+    "disc0:/disc/PE_DISC2.BIN",
+    "host0:/disc/PE_DISC2.bin",
+    "host0:/disc/PE_DISC2.BIN",
     NULL
 };
 
@@ -215,9 +219,11 @@ static void fatal_disc_not_found(int disc_num, const char * const candidates[], 
     char log_buf[512];
     int len;
 
-    /* a) Write [FATAL ERROR] FILE NOT FOUND to stderr via sceIoWrite(2, ...) */
+    /* a) Write [PE-PSP] FATAL ERROR: File not found to stderr */
+    fprintf(stderr, "[PE-PSP] FATAL ERROR: File not found: %s (last sceIoOpen error: 0x%08X)\n",
+            disc_name, (unsigned int)last_error);
     len = snprintf(log_buf, sizeof(log_buf),
-                   "\n[FATAL ERROR] FILE NOT FOUND: %s (last sceIoOpen error: 0x%08X)\nAttempted paths:\n",
+                   "\n[PE-PSP] FATAL ERROR: File not found: %s (last sceIoOpen error: 0x%08X)\nAttempted paths:\n",
                    disc_name, (unsigned int)last_error);
     sceIoWrite(2, log_buf, len);
 
@@ -226,7 +232,7 @@ static void fatal_disc_not_found(int disc_num, const char * const candidates[], 
         sceIoWrite(2, log_buf, len);
     }
 
-    /* b) Initialize PSP hardware debug screen with red background */
+    /* b) Initialize PSP hardware debug screen with red text */
     pspDebugScreenInit();
     pspDebugScreenSetBackColor(0xFF000080); /* Dark red background */
     pspDebugScreenSetTextColor(0xFF0000FF); /* Bright red text (ABGR) */
@@ -236,8 +242,9 @@ static void fatal_disc_not_found(int disc_num, const char * const candidates[], 
     pspDebugScreenPrintf("  ======================================================\n");
     pspDebugScreenPrintf("          PARASITE EVE PSP PORT - FATAL ERROR           \n");
     pspDebugScreenPrintf("  ======================================================\n\n");
-    pspDebugScreenPrintf("  FATAL ERROR: File not found -> %s\n\n", disc_name);
-    pspDebugScreenPrintf("  Place PE_DISC1.bin and PE_DISC2.bin in:\n");
+    pspDebugScreenPrintf("  FATAL ERROR: File not found: PE_DISC1.bin / PE_DISC1.BIN\n");
+    pspDebugScreenPrintf("  Missing target: %s\n\n", disc_name);
+    pspDebugScreenPrintf("  Place PE_DISC1.bin and PE_DISC2.bin (or .BIN) in:\n");
     pspDebugScreenPrintf("    ms0:/PSP/GAME/ParasiteEve/disc/\n\n");
     pspDebugScreenPrintf("  Attempted paths (last sceIoOpen err: 0x%08X):\n", (unsigned int)last_error);
     for (int i = 0; candidates[i] != NULL; i++) {
@@ -267,12 +274,15 @@ int psp_verify_disc_files(void)
     int disc2_found = 0;
     int last_err1 = -1;
     int last_err2 = -1;
+    const char *found_path1 = NULL;
+    const char *found_path2 = NULL;
 
     for (int i = 0; s_disc1_search_paths[i] != NULL; i++) {
         SceUID fd = sceIoOpen(s_disc1_search_paths[i], PSP_O_RDONLY, 0);
         if (fd >= 0) {
             sceIoClose(fd);
             disc1_found = 1;
+            found_path1 = s_disc1_search_paths[i];
             break;
         } else {
             last_err1 = (int)fd;
@@ -284,6 +294,7 @@ int psp_verify_disc_files(void)
         if (fd >= 0) {
             sceIoClose(fd);
             disc2_found = 1;
+            found_path2 = s_disc2_search_paths[i];
             break;
         } else {
             last_err2 = (int)fd;
@@ -291,18 +302,19 @@ int psp_verify_disc_files(void)
     }
 
     if (!disc1_found || !disc2_found) {
-        char err_msg[512];
+        char err_msg[768];
         int len;
 
-        /* Write to stderr via sceIoWrite(2, ...) */
+        fprintf(stderr, "[PE-PSP] FATAL ERROR: File not found: PE_DISC1.bin / PE_DISC1.BIN\n");
         len = snprintf(err_msg, sizeof(err_msg),
-            "\n[FATAL ERROR] File not found -> PE_DISC1.bin / PE_DISC1.BIN or PE_DISC2.bin / PE_DISC2.BIN\n"
+            "\n[PE-PSP] FATAL ERROR: File not found: PE_DISC1.bin / PE_DISC1.BIN\n"
             "Disc 1 found: %s (last err: 0x%08X)\n"
             "Disc 2 found: %s (last err: 0x%08X)\n"
             "Attempted search locations:\n"
             "  1. disc/PE_DISC1.bin | disc/PE_DISC1.BIN | disc/PE_DISC2.bin | disc/PE_DISC2.BIN\n"
-            "  2. ms0:/PSP/GAME/ParasiteEve/disc/PE_DISC1.bin | .BIN | PE_DISC2.bin | .BIN\n"
-            "  3. ./PE_DISC1.bin | .BIN | ./PE_DISC2.bin | .BIN\n",
+            "  2. ./PE_DISC1.bin | ./PE_DISC1.BIN | ./PE_DISC2.bin | ./PE_DISC2.BIN\n"
+            "  3. ms0:/PSP/GAME/ParasiteEve/disc/PE_DISC1.bin | .BIN | PE_DISC2.bin | .BIN\n"
+            "  4. host0:/disc/PE_DISC1.bin | .BIN | PE_DISC2.bin | .BIN\n",
             disc1_found ? "YES" : "NO", (unsigned int)last_err1,
             disc2_found ? "YES" : "NO", (unsigned int)last_err2);
         sceIoWrite(2, err_msg, len);
@@ -317,7 +329,7 @@ int psp_verify_disc_files(void)
         pspDebugScreenPrintf("  ======================================================\n");
         pspDebugScreenPrintf("          PARASITE EVE PSP PORT - FATAL ERROR           \n");
         pspDebugScreenPrintf("  ======================================================\n\n");
-        pspDebugScreenPrintf("  FATAL ERROR: File not found -> PE_DISC1.bin / PE_DISC1.BIN\n\n");
+        pspDebugScreenPrintf("  FATAL ERROR: File not found: PE_DISC1.bin / PE_DISC1.BIN\n\n");
         pspDebugScreenPrintf("  Status:\n");
         pspDebugScreenPrintf("    - PE_DISC1.bin / .BIN: %s\n", disc1_found ? "FOUND" : "MISSING");
         pspDebugScreenPrintf("    - PE_DISC2.bin / .BIN: %s\n\n", disc2_found ? "FOUND" : "MISSING");
@@ -345,6 +357,14 @@ int psp_verify_disc_files(void)
         return 0;
     }
 
+    {
+        char ok_msg[256];
+        int len = snprintf(ok_msg, sizeof(ok_msg),
+            "[PE-PSP] Disc check passed: Disc1='%s', Disc2='%s'\n",
+            found_path1 ? found_path1 : "OK",
+            found_path2 ? found_path2 : "OK");
+        sceIoWrite(2, ok_msg, len);
+    }
     return 1;
 }
 
@@ -421,7 +441,7 @@ found:
 
         char msg[256];
         int len = snprintf(msg, sizeof(msg),
-                 "[PSP_CDROM] Opened %s from %s (%u sectors, %lu MB, stride=%u, offset=+%u, fd=%d)\n",
+                 "[PE-PSP] [PSP_CDROM] Opened %s from %s (%u sectors, %lu MB, stride=%u, offset=+%u, fd=%d)\n",
                  disc_name,
                  (disc_num == 2 ? s_cd.disc2_path : s_cd.disc1_path),
                  (unsigned)s_cd.total_sectors,
@@ -429,7 +449,7 @@ found:
                  (unsigned)s_cd.sector_stride,
                  (unsigned)s_cd.user_offset,
                  (int)s_cd.fd);
-        sceIoWrite(1, msg, len);
+        sceIoWrite(2, msg, len);
     }
     return 1;
 }
