@@ -11,11 +11,14 @@ PE1_STATIC_ASSERT(sizeof(DslLOC) == 4, dsl_loc_size);
 extern u32 g_CdDsActive;
 
 /* Psy-Q LIBDS.H file record returned by DsSearchFile. */
+#ifndef DSLFILE_DEFINED
+#define DSLFILE_DEFINED
 typedef struct DslFILE {
     DslLOC pos;
     u_int size;
     char name[16];
 } DslFILE;
+#endif
 
 /* DS_newmedia fills this table from ISO-9660 path-table records. */
 typedef struct DslDirectoryCacheEntry {

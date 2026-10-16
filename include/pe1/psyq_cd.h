@@ -93,12 +93,15 @@ PE1_STATIC_ASSERT(PE1_OFFSETOF(CdReadProgressState, inProgress) == 0x28,
 /* Optional 2048-byte-sector staging buffer used by the streaming CD path. */
 extern u8 *g_CdStreamMemorySource;
 
+#ifndef CDLLOC_DEFINED
+#define CDLLOC_DEFINED
 typedef struct CdlLOC {
     u_char minute;
     u_char second;
     u_char sector;
     u_char track;
 } CdlLOC;
+#endif
 
 /* Psy-Q LIBCD.H streaming-sector header. Each ring entry is 32 bytes. */
 typedef struct StHEADER {
