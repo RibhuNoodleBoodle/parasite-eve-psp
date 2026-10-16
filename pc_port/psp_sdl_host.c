@@ -400,6 +400,127 @@ void PspHost_Delay(uint32_t ms)
     SDL_Delay(ms);
 }
 
+/* ── PS1 BIOS / Psy-Q Event Table Implementation ───────────────────────────── */
+
+typedef struct PsxEventEntry {
+    uint32_t desc;
+    int spec;
+    int mode;
+    int (*func)(void);
+    int enabled;
+    int triggered;
+    int in_use;
+} PsxEventEntry;
+
+#define MAX_PSX_EVENTS 32
+static PsxEventEntry s_psx_events[MAX_PSX_EVENTS];
+
+int OpenEvent(unsigned int desc, int spec, int mode, int (*func)(void))
+{
+    for (int i = 0; i < MAX_PSX_EVENTS; i++) {
+        if (!s_psx_events[i].in_use) {
+            s_psx_events[i].in_use = 1;
+            s_psx_events[i].desc = desc;
+            s_psx_events[i].spec = spec;
+            s_psx_events[i].mode = mode;
+            s_psx_events[i].func = func;
+            s_psx_events[i].enabled = 0;
+            s_psx_events[i].triggered = 0;
+            return i + 1; /* 1-based event handle */
+        }
+    }
+    return 0;
+}
+
+int CloseEvent(int event)
+{
+    int idx = event - 1;
+    if (idx < 0 || idx >= MAX_PSX_EVENTS || !s_psx_events[idx].in_use) return 0;
+    memset(&s_psx_events[idx], 0, sizeof(PsxEventEntry));
+    return 1;
+}
+
+int EnableEvent(int event)
+{
+    int idx = event - 1;
+    if (idx < 0 || idx >= MAX_PSX_EVENTS || !s_psx_events[idx].in_use) return 0;
+    s_psx_events[idx].enabled = 1;
+    return 1;
+}
+
+int DisableEvent(int event)
+{
+    int idx = event - 1;
+    if (idx < 0 || idx >= MAX_PSX_EVENTS || !s_psx_events[idx].in_use) return 0;
+    s_psx_events[idx].enabled = 0;
+    return 1;
+}
+
+int TestEvent(int event)
+{
+    int idx = event - 1;
+    if (idx < 0 || idx >= MAX_PSX_EVENTS || !s_psx_events[idx].in_use) return 0;
+    if (!s_psx_events[idx].enabled) return 0;
+    if (s_psx_events[idx].triggered) {
+        s_psx_events[idx].triggered = 0;
+        return 1;
+    }
+    return 0;
+}
+
+int DeliverEvent(unsigned int desc, int spec)
+{
+    int delivered = 0;
+    for (int i = 0; i < MAX_PSX_EVENTS; i++) {
+        if (s_psx_events[i].in_use && s_psx_events[i].enabled) {
+            if (s_psx_events[i].desc == desc && (s_psx_events[i].spec == spec || s_psx_events[i].spec == 0)) {
+                s_psx_events[i].triggered = 1;
+                if (s_psx_events[i].func) {
+                    s_psx_events[i].func();
+                }
+                delivered++;
+            }
+        }
+    }
+    return delivered;
+}
+
+int UnDeliverEvent(unsigned int desc, int spec)
+{
+    int count = 0;
+    for (int i = 0; i < MAX_PSX_EVENTS; i++) {
+        if (s_psx_events[i].in_use) {
+            if (s_psx_events[i].desc == desc && (s_psx_events[i].spec == spec || s_psx_events[i].spec == 0)) {
+                s_psx_events[i].triggered = 0;
+                count++;
+            }
+        }
+    }
+    return count;
+}
+
+/* Critical section handlers */
+static int s_critical_section_depth = 0;
+
+int EnterCriticalSection(void)
+{
+    s_critical_section_depth++;
+    return 1;
+}
+
+void ExitCriticalSection(void)
+{
+    if (s_critical_section_depth > 0) {
+        s_critical_section_depth--;
+    }
+}
+
+void FlushCache(void)
+{
+    sceKernelDcacheWritebackInvalidateAll();
+    sceKernelIcacheInvalidateAll();
+}
+
 #ifdef main
 #undef main
 #endif

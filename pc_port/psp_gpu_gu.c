@@ -1370,6 +1370,26 @@ void PspGpu_DrawOTagEnv(const uint32_t *ot, int count, const DRAWENV *env) {
  * ------------------------------------------------------------------------------
  */
 
+static void (*s_vsync_callback)(void) = NULL;
+static void (*s_drawsync_callback)(void) = NULL;
+
+void (*VSyncCallback(void (*func)(void)))(void) {
+    void (*prev)(void) = s_vsync_callback;
+    s_vsync_callback = func;
+    return prev;
+}
+
+void (*DrawSyncCallback(void (*func)(void)))(void) {
+    void (*prev)(void) = s_drawsync_callback;
+    s_drawsync_callback = func;
+    return prev;
+}
+
+int SetGraphDebug(int level) {
+    (void)level;
+    return 0;
+}
+
 int DrawSync(int mode) {
     (void)mode;
     if (g_psp_gpu.in_frame) {
@@ -1377,6 +1397,9 @@ int DrawSync(int mode) {
         sceGuFinish();
         sceGuSync(0, 0);
         g_psp_gpu.in_frame = 0;
+    }
+    if (s_drawsync_callback) {
+        s_drawsync_callback();
     }
     return 0;
 }
@@ -1397,6 +1420,10 @@ int VSync(int mode) {
     g_psp_gpu.disp_buffer = g_psp_gpu.draw_buffer;
     g_psp_gpu.draw_buffer = sceGuSwapBuffers();
     g_psp_gpu.frame_counter++;
+
+    if (s_vsync_callback) {
+        s_vsync_callback();
+    }
     return 0;
 }
 

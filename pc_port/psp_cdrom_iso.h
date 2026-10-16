@@ -142,6 +142,50 @@ int  PspStr_DecodeFrame(const uint8_t *str_chunk_stream, size_t total_bytes,
 int  PspStr_StreamVideo(uint32_t start_lba, uint32_t sector_count,
                         void *dst_texture, int tex_width, int tex_height, int is_16bit);
 
+#ifndef CDLLOC_DEFINED
+#define CDLLOC_DEFINED
+typedef struct CdlLOC {
+    uint8_t minute;
+    uint8_t second;
+    uint8_t sector;
+    uint8_t track;
+} CdlLOC;
+#endif
+
+#ifndef DSLFILE_DEFINED
+#define DSLFILE_DEFINED
+typedef struct DslFILE {
+    CdlLOC pos;
+    uint32_t size;
+    char name[16];
+} DslFILE;
+#endif
+
+/* PS1 Psy-Q libds & cdrom prototypes */
+int DsSystemStatus(void);
+int DsShellOpen(void);
+int DsQueueLen(void);
+int DsGetDiskType(void);
+int DsPosToInt(CdlLOC *position);
+CdlLOC *DsIntToPos(int i, CdlLOC *p);
+DslFILE *DsSearchFile(DslFILE *file, const char *name);
+int CdRom_ReadSectors(uint32_t lba, uint32_t offset, void *destination, uint32_t size);
+int CdRom_ReadSectorsFromLba(uint32_t lba, void *destination, uint32_t size);
+int CdRom_PollReady(void);
+int DsReadSync(void *argument);
+int DsReady(uint8_t *destination);
+int DsRead(CdlLOC *position, int sectors, void *destination, int mode);
+int DsControl(unsigned char command, void *param, void *result);
+int DsControlB(unsigned char command, void *param, void *result);
+void DS_restart(void);
+int DS_system_active(void);
+int DsReset(void);
+int ER_retry(void);
+int DS_lastcom(void);
+int DS_lastmode(void);
+CdlLOC *DS_lastpos(void);
+CdlLOC *DsLastPos(CdlLOC *destination);
+
 #ifdef __cplusplus
 }
 #endif

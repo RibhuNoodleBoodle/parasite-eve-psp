@@ -15,8 +15,8 @@
 Pe1GameState g_GameState;
 unsigned int g_GameStateFlags;
 u32 g_GameStateFlagsWord;
-u32 g_SceneDispatchToken;
-u32 g_SceneDispatchCur;
+int g_SceneDispatchToken;
+int g_SceneDispatchCur;
 u32 g_PlayTimeFrameCounter;
 
 void psx_main(void) {

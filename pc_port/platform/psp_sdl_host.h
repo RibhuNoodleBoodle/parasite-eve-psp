@@ -37,6 +37,20 @@ void PspHost_Shutdown(void);
 int  PspHost_IsRunning(void);
 void psx_main(void);
 
+/* PS1 BIOS Event API */
+int OpenEvent(unsigned int desc, int spec, int mode, int (*func)(void));
+int CloseEvent(int event);
+int EnableEvent(int event);
+int DisableEvent(int event);
+int TestEvent(int event);
+int DeliverEvent(unsigned int desc, int spec);
+int UnDeliverEvent(unsigned int desc, int spec);
+
+/* Critical section handlers */
+int  EnterCriticalSection(void);
+void ExitCriticalSection(void);
+void FlushCache(void);
+
 /* Timing helpers */
 uint32_t PspHost_GetTicks(void);
 void     PspHost_Delay(uint32_t ms);

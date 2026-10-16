@@ -852,6 +852,236 @@ int CdGetSector(void *madr, int size)
     return ret;
 }
 
+/* ── PS1 Psy-Q libds & ISO9660 Directory Traversal ─────────────────────────── */
+
+#define DECODE_BCD(x) (((x) >> 4) * 10 + ((x) & 0xF))
+int DsPosToInt(CdlLOC *p)
+{
+    if (!p) return 0;
+    return (DECODE_BCD(p->minute) * 60 + DECODE_BCD(p->second)) * 75 +
+           DECODE_BCD(p->sector) - 150;
+}
+
+static inline int encode_bcd(int n)
+{
+    return ((n / 10) << 4) + (n % 10);
+}
+
+CdlLOC *DsIntToPos(int i, CdlLOC *p)
+{
+    if (!p) return NULL;
+    i += 150;
+    p->sector = (uint8_t)encode_bcd(i % 75);
+    p->second = (uint8_t)encode_bcd((i / 75) % 60);
+    p->minute = (uint8_t)encode_bcd((i / 75) / 60);
+    p->track  = 1;
+    return p;
+}
+
+DslFILE *DsSearchFile(DslFILE *file, const char *name)
+{
+    static DslFILE s_static_file;
+    DslFILE *out_file = file ? file : &s_static_file;
+    if (!name || !name[0]) return NULL;
+
+    uint8_t pvd[PSP_CDROM_SECTOR_USER];
+    if (!PspCdrom_ReadUserSector(16, pvd)) {
+        fprintf(stderr, "[ISO9660] Failed to read PVD at sector 16\n");
+        return NULL;
+    }
+
+    if (memcmp(pvd + 1, "CD001", 5) != 0) {
+        fprintf(stderr, "[ISO9660] Invalid PVD signature\n");
+        return NULL;
+    }
+
+    /* Root directory record at offset 156 */
+    uint32_t dir_lba  = (uint32_t)pvd[158] | ((uint32_t)pvd[159] << 8) |
+                        ((uint32_t)pvd[160] << 16) | ((uint32_t)pvd[161] << 24);
+    uint32_t dir_size = (uint32_t)pvd[166] | ((uint32_t)pvd[167] << 8) |
+                        ((uint32_t)pvd[168] << 16) | ((uint32_t)pvd[169] << 24);
+
+    char path_buf[256];
+    strncpy(path_buf, name, sizeof(path_buf) - 1);
+    path_buf[sizeof(path_buf) - 1] = '\0';
+
+    char *tokens[16];
+    int num_tokens = 0;
+    char *p = path_buf;
+    while (*p == '\\' || *p == '/') p++;
+    while (*p && num_tokens < 16) {
+        tokens[num_tokens++] = p;
+        while (*p && *p != '\\' && *p != '/') p++;
+        if (*p) {
+            *p++ = '\0';
+            while (*p == '\\' || *p == '/') p++;
+        }
+    }
+
+    if (num_tokens == 0) return NULL;
+
+    uint8_t dir_buf[PSP_CDROM_SECTOR_USER];
+
+    for (int t = 0; t < num_tokens; t++) {
+        const char *target = tokens[t];
+        int is_last = (t == num_tokens - 1);
+        int found_token = 0;
+
+        uint32_t sectors_to_read = (dir_size + PSP_CDROM_SECTOR_USER - 1) / PSP_CDROM_SECTOR_USER;
+        if (sectors_to_read > 4) sectors_to_read = 4;
+
+        for (uint32_t s = 0; s < sectors_to_read && !found_token; s++) {
+            if (!PspCdrom_ReadUserSector(dir_lba + s, dir_buf)) break;
+
+            uint32_t offset = 0;
+            while (offset < PSP_CDROM_SECTOR_USER) {
+                uint8_t rec_len = dir_buf[offset];
+                if (rec_len == 0) break;
+
+                uint32_t rec_lba  = (uint32_t)dir_buf[offset + 2] |
+                                    ((uint32_t)dir_buf[offset + 3] << 8) |
+                                    ((uint32_t)dir_buf[offset + 4] << 16) |
+                                    ((uint32_t)dir_buf[offset + 5] << 24);
+                uint32_t rec_size = (uint32_t)dir_buf[offset + 10] |
+                                    ((uint32_t)dir_buf[offset + 11] << 8) |
+                                    ((uint32_t)dir_buf[offset + 12] << 16) |
+                                    ((uint32_t)dir_buf[offset + 13] << 24);
+                uint8_t flags     = dir_buf[offset + 25];
+                uint8_t name_len  = dir_buf[offset + 32];
+                const char *rec_name = (const char *)&dir_buf[offset + 33];
+
+                char entry_name[64];
+                int copy_len = (name_len < 63) ? name_len : 63;
+                memcpy(entry_name, rec_name, copy_len);
+                entry_name[copy_len] = '\0';
+
+                int match = (strcasecmp(target, entry_name) == 0);
+                if (!match) {
+                    char t_strip[64], e_strip[64];
+                    strncpy(t_strip, target, 63); t_strip[63] = '\0';
+                    char *sc = strchr(t_strip, ';'); if (sc) *sc = '\0';
+                    strncpy(e_strip, entry_name, 63); e_strip[63] = '\0';
+                    sc = strchr(e_strip, ';'); if (sc) *sc = '\0';
+                    if (strcasecmp(t_strip, e_strip) == 0) match = 1;
+                }
+
+                if (match) {
+                    if (is_last) {
+                        out_file->size = rec_size;
+                        DsIntToPos((int)rec_lba, &out_file->pos);
+                        strncpy(out_file->name, target, 15);
+                        out_file->name[15] = '\0';
+                        fprintf(stderr, "[ISO9660] DsSearchFile: found '%s' -> LBA %u, size %u bytes\n",
+                                name, (unsigned)rec_lba, (unsigned)rec_size);
+                        return out_file;
+                    } else if (flags & 2) {
+                        dir_lba = rec_lba;
+                        dir_size = rec_size;
+                        found_token = 1;
+                        break;
+                    }
+                }
+
+                offset += rec_len;
+            }
+        }
+
+        if (!found_token && !is_last) {
+            fprintf(stderr, "[ISO9660] DsSearchFile: directory component '%s' not found for '%s'\n", target, name);
+            return NULL;
+        }
+    }
+
+    fprintf(stderr, "[ISO9660] DsSearchFile: '%s' not found on disc\n", name);
+    return NULL;
+}
+
+int CdRom_ReadSectors(uint32_t lba, uint32_t offset, void *destination, uint32_t size)
+{
+    if (!destination || size == 0) return 0;
+    uint8_t *dst = (uint8_t *)destination;
+    uint32_t start_lba = lba + offset;
+    for (uint32_t i = 0; i < size; i++) {
+        if (!PspCdrom_ReadUserSector(start_lba + i, dst + (i * PSP_CDROM_SECTOR_USER))) {
+            memset(dst + (i * PSP_CDROM_SECTOR_USER), 0, PSP_CDROM_SECTOR_USER);
+        }
+    }
+    return 0;
+}
+
+int CdRom_ReadSectorsFromLba(uint32_t lba, void *destination, uint32_t size)
+{
+    return CdRom_ReadSectors(lba, 0, destination, size);
+}
+
+int CdRom_PollReady(void)
+{
+    return 0;
+}
+
+int DsReadSync(void *argument)
+{
+    (void)argument;
+    return 0;
+}
+
+int DsReady(uint8_t *destination)
+{
+    (void)destination;
+    return 0;
+}
+
+int DsRead(CdlLOC *position, int sectors, void *destination, int mode)
+{
+    (void)mode;
+    if (!position || !destination) return 0;
+    int lba = DsPosToInt(position);
+    return CdRom_ReadSectors((uint32_t)lba, 0, destination, (uint32_t)sectors);
+}
+
+int DsControl(unsigned char command, void *param, void *result)
+{
+    return CdControl(command, (const unsigned char *)param, (unsigned char *)result);
+}
+
+int DsControlB(unsigned char command, void *param, void *result)
+{
+    return CdControlB(command, (const unsigned char *)param, (unsigned char *)result);
+}
+
+int DsSystemStatus(void)
+{
+    return 1;
+}
+
+int DsShellOpen(void)
+{
+    return 0;
+}
+
+int DsQueueLen(void)
+{
+    return 0;
+}
+
+int DsGetDiskType(void)
+{
+    return 4; /* PS1 CD-ROM disc */
+}
+
+void DS_restart(void) {}
+int DS_system_active(void) { return 1; }
+int DsReset(void) { return 1; }
+int ER_retry(void) { return 0; }
+int DS_lastcom(void) { return 0; }
+int DS_lastmode(void) { return 0; }
+static CdlLOC s_last_pos = {0};
+CdlLOC *DS_lastpos(void) { return &s_last_pos; }
+CdlLOC *DsLastPos(CdlLOC *destination) {
+    if (destination) *destination = s_last_pos;
+    return &s_last_pos;
+}
+
 /* ── PS1 MDEC & STR Movie Streaming (In-Place IDCT) ─────────────────────────── */
 
 static inline int32_t clamp_val(int32_t val, int32_t low, int32_t high)
