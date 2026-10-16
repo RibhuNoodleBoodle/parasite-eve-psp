@@ -38,8 +38,8 @@ endif
 # Decompiled PS1 EXE & Overlay source translation units
 DECOMP_SRCS := $(filter-out src/psp_%.c, $(wildcard src/*.c src/main/*.c src/main/*/*.c src/overlays/*/*.c))
 
-# Combined translation units
-C_SRCS   := $(HAL_SRCS) $(DECOMP_SRCS)
+# Combined translation units (HAL runtime executable)
+C_SRCS   := $(HAL_SRCS)
 
 # Generated object files
 OBJS     := $(patsubst %.c,%.o,$(C_SRCS))
@@ -74,12 +74,12 @@ INCDIR   = $(PSPDEV)/psp/include \
 # -DENABLE_PSP -D__psp__: Target platform identifiers
 CFLAGS   = -O2 -G0 -march=allegrex -mfp32 -mgp32 -ffast-math -fno-strict-aliasing \
            -Wall -Wextra -Wno-unused-parameter -Wno-unused-variable \
-           -Wno-incompatible-pointer-types -std=gnu99 \
+           -Wno-incompatible-pointer-types -Wno-implicit-function-declaration -std=gnu99 \
            -D_PSP_FW_VERSION=600 -DENABLE_PSP -D__psp__ \
-           -DPSP_DISC1_PATH="\"ms0:/PSP/GAME/ParasiteEve/disc/PE_DISC1.BIN\"" \
-           -DPSP_DISC1_FALLBACK="\"./disc/PE_DISC1.BIN\"" \
-           -DPSP_DISC2_PATH="\"ms0:/PSP/GAME/ParasiteEve/disc/PE_DISC2.BIN\"" \
-           -DPSP_DISC2_FALLBACK="\"./disc/PE_DISC2.BIN\""
+           -DPSP_DISC1_PATH="\"ms0:/PSP/GAME/ParasiteEve/disc/PE_DISC1.bin\"" \
+           -DPSP_DISC1_FALLBACK="\"./disc/PE_DISC1.bin\"" \
+           -DPSP_DISC2_PATH="\"ms0:/PSP/GAME/ParasiteEve/disc/PE_DISC2.bin\"" \
+           -DPSP_DISC2_FALLBACK="\"./disc/PE_DISC2.bin\""
 
 CXXFLAGS = $(CFLAGS) -fno-exceptions -fno-rtti
 ASFLAGS  = $(CFLAGS)
@@ -101,9 +101,10 @@ LIBDIR   = $(PSPDEV)/psp/lib $(PSPSDK)/lib
 # -lpspaudio  : Low-level hardware audio channel output
 # -lpsppower  : Battery and CPU clock management (333/166MHz)
 # -lpsprtc    : High-resolution hardware real-time clock
+# -lpspdebug  : PSP hardware debug screen and formatted printf
 # -lm -lc     : Newlib Standard C and Math libraries
 LIBS     = -lSDL_mixer -lSDL -lpng -lz -lpspgum -lpspgu -lpspge -lpspdisplay \
-           -lpspctrl -lpspaudio -lpsppower -lpsprtc -lm -lc
+           -lpspctrl -lpspaudio -lpsppower -lpsprtc -lpspdebug -lm -lc
 
 # ------------------------------------------------------------------------------
 # Target Architecture Configuration

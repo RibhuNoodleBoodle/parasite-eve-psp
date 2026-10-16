@@ -32,19 +32,19 @@ extern "C" {
 #endif
 
 #ifndef PSP_DISC1_PATH
-#define PSP_DISC1_PATH           "ms0:/PSP/GAME/ParasiteEve/disc/PE_DISC1.BIN"
+#define PSP_DISC1_PATH           "ms0:/PSP/GAME/ParasiteEve/disc/PE_DISC1.bin"
 #endif
 
 #ifndef PSP_DISC1_FALLBACK
-#define PSP_DISC1_FALLBACK       "./disc/PE_DISC1.BIN"
+#define PSP_DISC1_FALLBACK       "./disc/PE_DISC1.bin"
 #endif
 
 #ifndef PSP_DISC2_PATH
-#define PSP_DISC2_PATH           "ms0:/PSP/GAME/ParasiteEve/disc/PE_DISC2.BIN"
+#define PSP_DISC2_PATH           "ms0:/PSP/GAME/ParasiteEve/disc/PE_DISC2.bin"
 #endif
 
 #ifndef PSP_DISC2_FALLBACK
-#define PSP_DISC2_FALLBACK       "./disc/PE_DISC2.BIN"
+#define PSP_DISC2_FALLBACK       "./disc/PE_DISC2.bin"
 #endif
 
 #define PSP_DISC1_DEFAULT_PATH   PSP_DISC1_PATH
@@ -81,9 +81,11 @@ extern "C" {
 #define CdlReadToc               0x1E
 
 /* Subsystem Lifecycle */
+int  psp_verify_disc_files(void);
 int  PspCdrom_Init(const char *disc1_path, const char *disc2_path);
 void PspCdrom_Shutdown(void);
 int  PspCdrom_IsInitialized(void);
+int  PspCdrom_CheckDiscExists(int disc_number);
 
 /* Disc Hot-Swapping */
 int  PspCdrom_SwapDisc(int disc_number); /* 1 = Disc 1, 2 = Disc 2 */
@@ -99,8 +101,10 @@ uint32_t PspCdrom_GetSectorCount(void);
 
 /* Psy-Q Cdl Compatibility Functions */
 int  CdControl(unsigned char com, const unsigned char *param, unsigned char *result);
+int  CdControlF(unsigned char com, const unsigned char *param);
 int  CdControlB(unsigned char com, const unsigned char *param, unsigned char *result);
 int  CdRead(int sectors, unsigned long *buf, int mode);
+int  CdSync(int mode, unsigned char *result);
 int  CdReadSync(int mode, unsigned char *result);
 int  CdReady(int mode, unsigned char *result);
 int  CdSeekL(const unsigned char *msf);
