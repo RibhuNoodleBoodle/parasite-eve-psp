@@ -32,12 +32,14 @@
 static unsigned int __attribute__((aligned(64))) g_display_list[PSP_GU_DISPLAY_LIST_SIZE / sizeof(unsigned int)];
 
 /* 1024x512 16-bit PS1 VRAM shadow buffer (1 MB) in main RAM */
-static uint16_t __attribute__((aligned(64))) g_ps1_vram[PS1_VRAM_PIXELS];
+uint16_t __attribute__((aligned(64))) g_ps1_vram[PS1_VRAM_PIXELS];
 
 /* 512x512 16-bit decoded power-of-two texture page (512 KB) */
 static uint16_t __attribute__((aligned(64))) s_decoded_tpage[512 * 512];
 /* Dedicated 512x512 16-bit decoded DISPENV framebuffer texture (512 KB) */
 static uint16_t __attribute__((aligned(64))) s_dispenv_tex[512 * 512];
+/* Dedicated 512x512 32-bit decoded 24-bit RGB DISPENV framebuffer texture (1 MB) */
+static uint32_t __attribute__((aligned(64))) s_dispenv_tex32[512 * 512];
 static uint16_t s_cached_tpage = 0xFFFF;
 static uint16_t s_cached_clut  = 0xFFFF;
 static uint32_t s_cached_textures_uploaded = 0xFFFFFFFF;
@@ -1317,30 +1319,29 @@ void psp_render_vram_dispenv(void) {
                 dst_row[c] = pix;
             }
         }
+        /* Writeback decoded DISPENV texture to RAM for GE */
+        sceKernelDcacheWritebackInvalidateRange(s_dispenv_tex, sizeof(s_dispenv_tex));
+        sceGuTexMode(GU_PSM_5551, 0, 0, 0);
+        sceGuTexImage(0, 512, 512, 512, s_dispenv_tex);
     } else {
-        /* 24-bit RGB mode (3 bytes per pixel packed in VRAM) */
+        /* 24-bit RGB mode (3 bytes per pixel packed in 16-bit VRAM words) */
         for (int r = 0; r < disp_h; r++) {
             int src_y = (disp_y + r) & 0x1FF;
             const uint8_t *src_bytes = (const uint8_t *)&g_ps1_vram[src_y * PS1_VRAM_WIDTH];
-            uint16_t *dst_row = &s_dispenv_tex[r * 512];
+            uint32_t *dst_row = &s_dispenv_tex32[r * 512];
             for (int c = 0; c < disp_w; c++) {
                 int byte_idx = (disp_x * 2) + (c * 3);
                 uint8_t red   = src_bytes[byte_idx + 0];
                 uint8_t green = src_bytes[byte_idx + 1];
                 uint8_t blue  = src_bytes[byte_idx + 2];
-                uint16_t pix = (uint16_t)(((blue >> 3) << 10) | ((green >> 3) << 5) | (red >> 3));
-                if (pix != 0 || red != 0 || green != 0 || blue != 0) pix |= 0x8000;
-                dst_row[c] = pix;
+                dst_row[c] = 0xFF000000u | ((uint32_t)blue << 16) | ((uint32_t)green << 8) | (uint32_t)red;
             }
         }
+        /* Writeback decoded DISPENV texture to RAM for GE */
+        sceKernelDcacheWritebackInvalidateRange(s_dispenv_tex32, sizeof(s_dispenv_tex32));
+        sceGuTexMode(GU_PSM_8888, 0, 0, 0);
+        sceGuTexImage(0, 512, 512, 512, s_dispenv_tex32);
     }
-
-    /* Writeback decoded DISPENV texture to RAM for GE */
-    sceKernelDcacheWritebackInvalidateRange(s_dispenv_tex, sizeof(s_dispenv_tex));
-
-    /* Setup texturing for base quad */
-    sceGuTexMode(GU_PSM_5551, 0, 0, 0);
-    sceGuTexImage(0, 512, 512, 512, s_dispenv_tex);
     sceGuTexFlush();
     sceGuTexFunc(GU_TFX_REPLACE, GU_TCC_RGBA);
     sceGuTexFilter(GU_LINEAR, GU_LINEAR);
@@ -1371,23 +1372,23 @@ void psp_render_vram_dispenv(void) {
 }
 
 void PspGpu_DrawOTag(const uint32_t *ot, int count) {
-    if (!ot || count <= 0) return;
-
     PspGpu_BeginFrame();
 
     /* Render authentic DISPENV shadow VRAM base quad */
     psp_render_vram_dispenv();
 
-    uintptr_t high_bits = (uintptr_t)ot & 0xFF000000u;
+    if (ot && count > 0) {
+        uintptr_t high_bits = (uintptr_t)ot & 0xFF000000u;
 
-    /* Back-to-front rendering: traverse Ordering Table entries from count-1 down to 0 */
-    for (int i = count - 1; i >= 0; i--) {
-        uint32_t head = ot[i];
-        uint32_t addr24 = head & 0x00FFFFFFu;
-        if (addr24 == 0x00FFFFFFu || addr24 == 0) continue;
+        /* Back-to-front rendering: traverse Ordering Table entries from count-1 down to 0 */
+        for (int i = count - 1; i >= 0; i--) {
+            uint32_t head = ot[i];
+            uint32_t addr24 = head & 0x00FFFFFFu;
+            if (addr24 == 0x00FFFFFFu || addr24 == 0) continue;
 
-        const uint32_t *packet = (const uint32_t *)(high_bits | (uintptr_t)addr24);
-        PspGpu_ExecutePacket(packet);
+            const uint32_t *packet = (const uint32_t *)(high_bits | (uintptr_t)addr24);
+            PspGpu_ExecutePacket(packet);
+        }
     }
 
     PspGpu_EndFrame();
@@ -1504,7 +1505,7 @@ int VSync(int mode) {
             }
         }
 
-        if (s_enable_frame_dump && g_psp_gpu.frame_counter <= 240) {
+        if (s_enable_frame_dump && g_psp_gpu.frame_counter <= 600) {
             uint16_t *edram_disp = (uint16_t *)((uintptr_t)0x44000000u + (uintptr_t)g_psp_gpu.disp_buffer);
             uint32_t disp_nonblack = 0;
 
@@ -1519,7 +1520,15 @@ int VSync(int mode) {
                     uint16_t out_pix = 0x8000u;
                     if (x >= 59 && x < 59 + 362) {
                         int src_x = ((x - 59) * disp_w) / 362;
-                        out_pix = s_dispenv_tex[src_y * 512 + src_x];
+                        if (g_psp_gpu.current_dispenv.isrgb24) {
+                            uint32_t c32 = s_dispenv_tex32[src_y * 512 + src_x];
+                            uint8_t r = (uint8_t)(c32 & 0xFF);
+                            uint8_t g = (uint8_t)((c32 >> 8) & 0xFF);
+                            uint8_t b = (uint8_t)((c32 >> 16) & 0xFF);
+                            out_pix = (uint16_t)(((b >> 3) << 10) | ((g >> 3) << 5) | (r >> 3) | 0x8000u);
+                        } else {
+                            out_pix = s_dispenv_tex[src_y * 512 + src_x];
+                        }
                         if (s_last_sprt_frame + 1 >= g_psp_gpu.frame_counter &&
                             x >= s_last_sprt_x0 && x < s_last_sprt_x1 &&
                             y >= s_last_sprt_y0 && y < s_last_sprt_y1 &&
@@ -1553,6 +1562,14 @@ int VSync(int mode) {
             if (g_psp_gpu.frame_counter == 60) {
                 psp_write_ppm_screenshot("ms0:/frame_dump_logo.ppm", edram_disp);
                 psp_write_ppm_screenshot("frame_dump_logo.ppm", edram_disp);
+            }
+            if (g_psp_gpu.current_dispenv.isrgb24 && disp_nonblack > 0) {
+                static int s_dumped_str = 0;
+                if (!s_dumped_str) {
+                    s_dumped_str = 1;
+                    psp_write_ppm_screenshot("ms0:/frame_dump_str.ppm", edram_disp);
+                    psp_write_ppm_screenshot("frame_dump_str.ppm", edram_disp);
+                }
             }
             psp_write_ppm_screenshot("ms0:/frame_dump.ppm", edram_disp);
             psp_write_ppm_screenshot("frame_dump.ppm", edram_disp);

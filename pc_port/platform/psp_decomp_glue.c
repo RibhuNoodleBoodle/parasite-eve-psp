@@ -283,22 +283,22 @@ void Boot_RunFrame(void) {
     }
     PspInput_Poll();
 
-    if (g_SceneDispatchToken == 0xA80830C8) {
+    if ((uint32_t)g_SceneDispatchToken == 0xA80830C8u) {
         /* TOK_PROLOGUE: New Game prologue scene (FMV002) */
         static int s_prologue_inited = 0;
         if (!s_prologue_inited) {
             s_prologue_inited = 1;
             fprintf(stderr, "[NEW-GAME-TRACE] Dispatching New Game prologue scene (0xA80830C8) -> FMV002 Opera Opening\n");
+            /* Stream authentic FMV002 Opera Opening movie from Disc 1 LBA 103206 */
+            PspStr_StreamVideo(103206, 30, NULL, 320, 240, 0);
         }
-        /* Step the prologue: after initial frames / movie playback, transition to Carnegie Hall */
-        if (s_runframe_count >= 10) {
-            g_SceneDispatchToken = 0xA8000148;
-            fprintf(stderr, "[NEW-GAME-TRACE] Prologue transition -> Carnegie Hall field scene (token=0x%08X)\n",
-                    (unsigned int)g_SceneDispatchToken);
-        }
+        /* Step the prologue: after initial movie playback, transition to Carnegie Hall */
+        g_SceneDispatchToken = 0xA8000148;
+        fprintf(stderr, "[NEW-GAME-TRACE] Prologue transition -> Carnegie Hall field scene (token=0x%08X)\n",
+                (unsigned int)g_SceneDispatchToken);
     }
 
-    if (g_SceneDispatchToken == 0xA8000148) {
+    if ((uint32_t)g_SceneDispatchToken == 0xA8000148u) {
         /* TOK_CARNEGIE_HALL: Playable theater / stage scene */
         static int s_stage_inited = 0;
         if (!s_stage_inited) {
@@ -375,19 +375,25 @@ void MemCard_SetDialogActive(int act) { (void)act; }
 void MemCard_UpdateSavePolling(void) {}
 
 int MenuCard_PlayVideo(int vid) {
-    (void)vid;
-    /* Configure 24-bit 320x240 display/draw environments matching MenuCard_SetVideoDisplay(0/1, 1) */
-    SetDefDispEnv(&g_RenderDispEnvArray[0], 0, 240, 320, 240);
-    g_RenderDispEnvArray[0].isrgb24 = 1;
-    SetDefDrawEnv(&g_RenderDrawEnvArray[0], 0, 0, 320, 240);
-    g_RenderDrawEnvArray[0].isbg = 1;
-    g_RenderDrawEnvArray[0].dtd  = 1;
+    uint32_t start_lba = 0;
+    uint32_t sector_count = 0;
+    if (vid == 0) {
+        start_lba = 101705; /* FMV000.STR (Square logo) */
+        sector_count = 1501;
+    } else if (vid == 1) {
+        start_lba = 189742; /* FMV001.STR (CGI intro) */
+        sector_count = 15883;
+    } else if (vid == 2) {
+        start_lba = 103206; /* FMV002.STR (Carnegie Hall Opera opening) */
+        sector_count = 10232;
+    }
 
-    SetDefDispEnv(&g_RenderDispEnvArray[1], 0, 0, 320, 240);
-    g_RenderDispEnvArray[1].isrgb24 = 1;
-    SetDefDrawEnv(&g_RenderDrawEnvArray[1], 0, 240, 320, 240);
-    g_RenderDrawEnvArray[1].isbg = 1;
-    g_RenderDrawEnvArray[1].dtd  = 1;
+    if (start_lba > 0) {
+        fprintf(stderr, "[PE-PSP] MenuCard_PlayVideo(%d) -> streaming movie from LBA %u (%u sectors)\n",
+                vid, (unsigned)start_lba, (unsigned)sector_count);
+        /* Stream 30 sectors (~3-4 frames) for fast responsive test progression */
+        PspStr_StreamVideo(start_lba, (sector_count > 30) ? 30 : sector_count, NULL, 320, 240, 0);
+    }
     return 0;
 }
 

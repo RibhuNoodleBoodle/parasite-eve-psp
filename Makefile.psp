@@ -44,7 +44,10 @@ DECOMP_SRCS := src/main/boot/main.c \
                src/overlays/menu_memcard/list_screen.c \
                src/overlays/menu_memcard/page_flip.c \
                src/overlays/menu_memcard/fade.c \
-               src/overlays/menu_memcard/image_nodes.c
+               src/overlays/menu_memcard/image_nodes.c \
+               src/overlays/mdec_diag/vlc_build.c \
+               src/overlays/mdec_diag/vlc_table_source.c \
+               src/overlays/mdec_diag/vlc_c.c
 
 # Combined translation units (HAL runtime executable + authentic decompiled logic)
 C_SRCS   := $(HAL_SRCS) $(DECOMP_SRCS)
@@ -83,7 +86,7 @@ INCDIR   = $(PSPDEV)/psp/include \
 CFLAGS   = -O2 -G0 -march=allegrex -mfp32 -mgp32 -ffast-math -fno-strict-aliasing \
            -Wall -Wextra -Wno-unused-parameter -Wno-unused-variable \
            -Wno-incompatible-pointer-types -Wno-implicit-function-declaration \
-           -Wno-int-conversion -std=gnu99 \
+           -Wno-int-conversion -std=gnu99 -Wa,-Iinclude \
            -D_PSP_FW_VERSION=600 -DENABLE_PSP -D__psp__ \
            -DPSP_DISC1_PATH="\"ms0:/PSP/GAME/ParasiteEve/disc/PE_DISC1.bin\"" \
            -DPSP_DISC1_FALLBACK="\"./disc/PE_DISC1.bin\"" \

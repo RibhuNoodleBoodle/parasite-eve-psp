@@ -13,6 +13,7 @@
 #include "psp_cdrom_iso.h"
 #include "psp_sdl_input.h"
 #include "psp_sdl_audio.h"
+#include "psp_gpu_gu.h"
 
 #include <pspkernel.h>
 #include <pspiofilemgr.h>
@@ -1274,35 +1275,371 @@ static int decode_block(const uint16_t *input, size_t input_words, size_t *pos,
     return 1;
 }
 
+/* ── PS1 Psy-Q Streaming Ring Buffer (St*) ──────────────────────────────────── */
+
+typedef struct StHEADER {
+    uint16_t id;
+    uint16_t type;
+    uint16_t secCount;
+    uint16_t nSectors;
+    uint32_t frameCount;
+    uint32_t frameSize;
+    uint16_t width;
+    uint16_t height;
+    uint32_t dummy1;
+    uint32_t dummy2;
+    CdlLOC   loc;
+} StHEADER;
+
+static StHEADER *s_st_ring_addr = NULL;
+static uint32_t  s_st_ring_size = 0;
+static uint32_t  s_st_read_slot = 0;
+static uint32_t  s_st_write_slot = 0;
+static uint32_t  s_st_stream_lba = 0;
+static int       s_st_stream_active = 0;
+static void    (*s_st_end_callback)(void) = NULL;
+
+extern void MdecDiag_ExpandDecoderTable(uint16_t *table);
+
+static uint16_t s_vlc_decoder_table[34816];
+static int      s_vlc_table_initialized = 0;
+
+void StSetRing(u32 *ring_addr, u32 ring_size)
+{
+    s_st_ring_addr = (StHEADER *)ring_addr;
+    s_st_ring_size = (ring_size > 0) ? ring_size : 64;
+    s_st_read_slot = 0;
+    s_st_write_slot = 0;
+    StClearRing();
+}
+
+void StClearRing(void)
+{
+    s_st_read_slot = 0;
+    s_st_write_slot = 0;
+    if (s_st_ring_addr && s_st_ring_size > 0) {
+        memset(s_st_ring_addr, 0, s_st_ring_size * sizeof(StHEADER));
+    }
+}
+
+void StUnSetRing(void)
+{
+    s_st_stream_active = 0;
+}
+
+void StSetStream(u32 mode, u32 startFrame, u32 endFrame, void (*callback1)(void), void (*callback2)(void))
+{
+    (void)mode;
+    (void)startFrame;
+    (void)endFrame;
+    (void)callback2;
+    s_st_stream_active = 1;
+    s_st_end_callback = callback1;
+}
+
+int StGetBackloc(CdlLOC *loc)
+{
+    if (loc) {
+        uint32_t lba = s_st_stream_lba + 150u;
+        loc->minute = (uint8_t)(lba / (60u * 75u));
+        loc->second = (uint8_t)((lba / 75u) % 60u);
+        loc->sector = (uint8_t)(lba % 75u);
+        loc->track  = 1;
+    }
+    return 0;
+}
+
+static void psp_str_pump_sectors(void)
+{
+    if (!s_st_ring_addr || s_st_ring_size == 0) return;
+
+    uint8_t sector_raw[PSP_CDROM_SECTOR_RAW];
+    static uint8_t s_frame_payloads[32][2016];
+    static uint8_t s_frame_headers[32][32];
+    static uint32_t s_asm_frame = 0;
+    static uint32_t s_asm_mask = 0;
+    static uint32_t s_asm_chunks = 0;
+    static int s_assembling = 0;
+
+    int max_sectors = 40;
+    while (max_sectors-- > 0) {
+        if (!PspCdrom_ReadRawSector(s_st_stream_lba++, sector_raw)) {
+            break;
+        }
+
+        uint8_t submode = sector_raw[18];
+
+        /* Check for XA audio (submode bit 0x04) */
+        if (submode & 0x04u) {
+            PspAudio_PushCdAudio((const int16_t *)(sector_raw + 24), 2016 / 4);
+            continue;
+        }
+
+        /* Check for STR video chunk (submode bit 0x08 and magic 0x0160) */
+        const uint8_t *user = sector_raw + 24;
+        uint16_t magic = (uint16_t)(user[0] | (user[1] << 8));
+        if ((submode & 0x08u) && magic == 0x0160u) {
+            uint16_t chunk_idx  = (uint16_t)(user[4] | (user[5] << 8));
+            uint16_t num_chunks = (uint16_t)(user[6] | (user[7] << 8));
+            uint32_t frame_no   = (uint32_t)(user[8] | (user[9] << 8) |
+                                            (user[10] << 16) | (user[11] << 24));
+
+            if (num_chunks == 0 || num_chunks > 32 || chunk_idx >= num_chunks) continue;
+
+            if (s_assembling && (frame_no != s_asm_frame || num_chunks != s_asm_chunks)) {
+                s_assembling = 0;
+            }
+
+            if (!s_assembling) {
+                s_assembling = 1;
+                s_asm_frame = frame_no;
+                s_asm_chunks = num_chunks;
+                s_asm_mask = 0;
+            }
+
+            memcpy(s_frame_headers[chunk_idx], user, 32);
+            memcpy(s_frame_payloads[chunk_idx], user + 32, 2016);
+            s_asm_mask |= (1u << chunk_idx);
+
+            uint32_t complete_mask = (num_chunks >= 32) ? 0xFFFFFFFFu : ((1u << num_chunks) - 1u);
+            if (s_asm_mask == complete_mask) {
+                s_assembling = 0;
+                uint32_t w = s_st_write_slot;
+                uint8_t *data_base = (uint8_t *)s_st_ring_addr + s_st_ring_size * 32u;
+
+                for (uint32_t k = 0; k < num_chunks; k++) {
+                    uint32_t slot = (w + k) % s_st_ring_size;
+                    StHEADER *hdr = &s_st_ring_addr[slot];
+                    memcpy(hdr, s_frame_headers[k], 32);
+                    memcpy(data_base + slot * 2016u, s_frame_payloads[k], 2016);
+                    hdr->nSectors = (uint16_t)num_chunks;
+                    hdr->id = (k == 0) ? 2 : 3;
+                }
+                s_st_ring_addr[w % s_st_ring_size].id = 2; /* publish frame! */
+                s_st_write_slot = (w + num_chunks) % s_st_ring_size;
+                break;
+            }
+        }
+    }
+}
+
+u32 StGetNext(u32 **addr, u32 **header)
+{
+    if (!s_st_ring_addr || s_st_ring_size == 0) return 1;
+
+    if (s_st_ring_addr[s_st_read_slot].id != 2) {
+        psp_str_pump_sectors();
+    }
+
+    if (s_st_ring_addr[s_st_read_slot].id == 2) {
+        s_st_ring_addr[s_st_read_slot].id = 4;
+        uint8_t *data_base = (uint8_t *)s_st_ring_addr + s_st_ring_size * 32u;
+        if (header) *header = (u32 *)&s_st_ring_addr[s_st_read_slot];
+        if (addr)   *addr   = (u32 *)(data_base + s_st_read_slot * 2016u);
+        return 0;
+    }
+
+    return 1;
+}
+
+u32 StFreeRing(u32 *ptr)
+{
+    if (!s_st_ring_addr || s_st_ring_size == 0 || !ptr) return 1;
+    uint8_t *data_base = (uint8_t *)s_st_ring_addr + s_st_ring_size * 32u;
+    uint32_t byte_diff = (uint8_t *)ptr - data_base;
+    uint32_t slot = (byte_diff / 2016u) % s_st_ring_size;
+    uint32_t count = s_st_ring_addr[slot].nSectors;
+    if (count == 0 || count > s_st_ring_size) count = 1;
+
+    for (uint32_t k = 0; k < count; k++) {
+        s_st_ring_addr[(slot + k) % s_st_ring_size].id = 0;
+    }
+    s_st_read_slot = (slot + count) % s_st_ring_size;
+    return 0;
+}
+
+/* ── PS1 Psy-Q MDEC Decompression API (DecDCT*) ────────────────────────────── */
+
+static void (*s_decdct_out_callback)(void) = NULL;
+static void (*s_decdct_in_callback)(void) = NULL;
+
+static const uint16_t *s_mdec_input_words = NULL;
+static size_t          s_mdec_input_word_count = 0;
+static size_t          s_mdec_word_pos = 0;
+static int             s_mdec_depth = 2; /* 2 = 24-bit RGB888, 3 = 16-bit RGB1555 */
+static int             s_mdec_slice_col = 0;
+static int             s_mdec_mb_cols = 20; /* 320 / 16 */
+static int             s_mdec_mb_rows = 15; /* 240 / 16 */
+
+void DecDCTReset(int mode)
+{
+    (void)mode;
+    s_mdec_slice_col = 0;
+    s_mdec_word_pos = 0;
+    PspMdec_Reset();
+}
+
+void DecDCTinCallback(void *callback)
+{
+    s_decdct_in_callback = (void (*)(void))callback;
+}
+
+void DecDCToutCallback(void *callback)
+{
+    s_decdct_out_callback = (void (*)(void))callback;
+}
+
+s32 DecDCTinSync(s32 mode)
+{
+    (void)mode;
+    return 0;
+}
+
+s32 DecDCToutSync(s32 mode)
+{
+    (void)mode;
+    return 0;
+}
+
+void DecDCTvlc(void *bs, void *buf)
+{
+    if (!s_vlc_table_initialized) {
+        MdecDiag_ExpandDecoderTable(s_vlc_decoder_table);
+        s_vlc_table_initialized = 1;
+    }
+    DecDCTvlc2(bs, buf, s_vlc_decoder_table);
+}
+
+void DecDCTvlcSize(u32 size)
+{
+    DecDCTvlcSize2(size);
+}
+
+void DecDCTin(void *buf, s32 mode)
+{
+    if (!buf) return;
+    uint32_t *cmd_ptr = (uint32_t *)buf;
+
+    if (mode & 1) {
+        *cmd_ptr &= ~0x08000000u;
+    } else {
+        *cmd_ptr |= 0x08000000u;
+    }
+    if (mode & 2) {
+        *cmd_ptr |= 0x02000000u;
+    } else {
+        *cmd_ptr &= ~0x02000000u;
+    }
+
+    uint32_t cmd = *cmd_ptr;
+    s_mdec_depth = (cmd >> 27u) & 3u;
+    s_mdec_input_words = (const uint16_t *)buf + 2; /* skip 32-bit command header */
+    s_mdec_input_word_count = (cmd & 0xFFFFu) * 2u;
+    s_mdec_word_pos = 0;
+    s_mdec_slice_col = 0;
+
+    if (s_decdct_in_callback) {
+        s_decdct_in_callback();
+    }
+}
+
+void DecDCTout(void *buf, u32 size)
+{
+    (void)size;
+    if (!buf) return;
+
+    int is_16bit = (s_mdec_depth == 3);
+    int mb_x = s_mdec_slice_col;
+
+    if (mb_x < s_mdec_mb_cols && s_mdec_input_words) {
+        int32_t mb_blocks[6][64];
+        for (int mb_y = 0; mb_y < s_mdec_mb_rows; mb_y++) {
+            /* Decode Cr (block 0) and Cb (block 1) */
+            if (decode_block(s_mdec_input_words, s_mdec_input_word_count, &s_mdec_word_pos, mb_blocks[0], s_mdec.quant_chroma) &&
+                decode_block(s_mdec_input_words, s_mdec_input_word_count, &s_mdec_word_pos, mb_blocks[1], s_mdec.quant_chroma)) {
+                /* Decode Y1, Y2, Y3, Y4 */
+                for (int b = 2; b < 6; b++) {
+                    decode_block(s_mdec_input_words, s_mdec_input_word_count, &s_mdec_word_pos, mb_blocks[b], s_mdec.quant_luma);
+                }
+            }
+
+            /* Convert 16x16 macroblock to vertical slice buffer */
+            for (int py = 0; py < 16; py++) {
+                int row = mb_y * 16 + py;
+                for (int px = 0; px < 16; px++) {
+                    int uv_idx = (py / 2) * 8 + (px / 2);
+                    int y_block_idx = 2 + (py / 8) * 2 + (px / 8);
+                    int y_pixel_idx = (py % 8) * 8 + (px % 8);
+
+                    int32_t lum = mb_blocks[y_block_idx][y_pixel_idx];
+                    int32_t cr  = mb_blocks[0][uv_idx];
+                    int32_t cb  = mb_blocks[1][uv_idx];
+
+                    int32_t r = lum + ((359 * cr + 128) >> 8);
+                    int32_t g = lum + ((-88 * cb - 183 * cr + 128) >> 8);
+                    int32_t b = lum + ((454 * cb + 128) >> 8);
+
+                    uint8_t red   = (uint8_t)clamp_val(r + 128, 0, 255);
+                    uint8_t green = (uint8_t)clamp_val(g + 128, 0, 255);
+                    uint8_t blue  = (uint8_t)clamp_val(b + 128, 0, 255);
+
+                    if (is_16bit) {
+                        uint16_t *dst_row = (uint16_t *)buf + row * 16;
+                        dst_row[px] = (uint16_t)((red >> 3) | ((green >> 3) << 5) | ((blue >> 3) << 10) | 0x8000u);
+                    } else {
+                        uint8_t *dst_row = (uint8_t *)buf + row * (16 * 3);
+                        dst_row[px * 3 + 0] = red;
+                        dst_row[px * 3 + 1] = green;
+                        dst_row[px * 3 + 2] = blue;
+                    }
+                }
+            }
+        }
+        s_mdec_slice_col++;
+    }
+
+    /* IMMEDIATELY invoke registered DecDCToutCallback */
+    if (s_decdct_out_callback) {
+        s_decdct_out_callback();
+    }
+}
+
 /*
- * Decode one STR video frame into sceGu texture buffer in-place
+ * Decode one STR video frame into destination buffer or shadow VRAM
  */
 int PspStr_DecodeFrame(const uint8_t *str_chunk_stream, size_t total_bytes,
                        void *dst_texture, int tex_width, int tex_height, int is_16bit)
 {
     const uint16_t *words = (const uint16_t *)str_chunk_stream;
     size_t num_words = total_bytes / 2u;
-    size_t word_pos = 0;
+    size_t word_pos = 2; /* skip 32-bit MDEC command word */
+
+    if (tex_width <= 0)  tex_width = 320;
+    if (tex_height <= 0) tex_height = 240;
 
     int mb_cols = tex_width / 16;
     int mb_rows = tex_height / 16;
 
-    /* Single scratch buffer per macroblock (6 blocks of 64 int32_t = 1.5 KB) */
+    if (!dst_texture) {
+        dst_texture = g_ps1_vram;
+    }
+
     int32_t mb_blocks[6][64];
 
     for (int mb_y = 0; mb_y < mb_rows; mb_y++) {
         for (int mb_x = 0; mb_x < mb_cols; mb_x++) {
             /* 1. Decode Cr (block 0) and Cb (block 1) */
-            if (!decode_block(words, num_words, &word_pos, mb_blocks[0], s_mdec.quant_chroma)) return 0;
-            if (!decode_block(words, num_words, &word_pos, mb_blocks[1], s_mdec.quant_chroma)) return 0;
+            if (!decode_block(words, num_words, &word_pos, mb_blocks[0], s_mdec.quant_chroma)) break;
+            if (!decode_block(words, num_words, &word_pos, mb_blocks[1], s_mdec.quant_chroma)) break;
 
             /* 2. Decode 4 Luma blocks Y1, Y2, Y3, Y4 (blocks 2..5) */
             for (int b = 2; b < 6; b++) {
-                if (!decode_block(words, num_words, &word_pos, mb_blocks[b], s_mdec.quant_luma)) return 0;
+                decode_block(words, num_words, &word_pos, mb_blocks[b], s_mdec.quant_luma);
             }
 
-            /* 3. Convert 16x16 macroblock from 4:2:0 YCbCr directly into destination texture */
+            /* 3. Convert 16x16 macroblock from 4:2:0 YCbCr directly into destination buffer */
             for (int py = 0; py < 16; py++) {
+                int dst_y = mb_y * 16 + py;
                 for (int px = 0; px < 16; px++) {
                     int uv_idx = (py / 2) * 8 + (px / 2);
                     int y_block_idx = 2 + (py / 8) * 2 + (px / 8);
@@ -1321,18 +1658,18 @@ int PspStr_DecodeFrame(const uint8_t *str_chunk_stream, size_t total_bytes,
                     uint8_t blue  = (uint8_t)clamp_val(b + 128, 0, 255);
 
                     int dst_x = mb_x * 16 + px;
-                    int dst_y = mb_y * 16 + py;
 
                     if (is_16bit) {
-                        /* 16-bit RGB5551 */
                         uint16_t *tex16 = (uint16_t *)dst_texture;
                         uint16_t col = (uint16_t)((red >> 3) | ((green >> 3) << 5) | ((blue >> 3) << 10) | 0x8000u);
-                        tex16[dst_y * tex_width + dst_x] = col;
+                        size_t stride = (dst_texture == g_ps1_vram) ? PS1_VRAM_WIDTH : (size_t)tex_width;
+                        tex16[dst_y * stride + dst_x] = col;
                     } else {
-                        /* 32-bit RGBA8888 */
-                        uint32_t *tex32 = (uint32_t *)dst_texture;
-                        uint32_t col = (uint32_t)(red | (green << 8) | (blue << 16) | 0xFF000000u);
-                        tex32[dst_y * tex_width + dst_x] = col;
+                        uint8_t *vram_bytes = (uint8_t *)dst_texture;
+                        size_t row_stride = (dst_texture == g_ps1_vram) ? (PS1_VRAM_WIDTH * 2) : (size_t)(tex_width * 3);
+                        vram_bytes[dst_y * row_stride + dst_x * 3 + 0] = red;
+                        vram_bytes[dst_y * row_stride + dst_x * 3 + 1] = green;
+                        vram_bytes[dst_y * row_stride + dst_x * 3 + 2] = blue;
                     }
                 }
             }
@@ -1344,28 +1681,43 @@ int PspStr_DecodeFrame(const uint8_t *str_chunk_stream, size_t total_bytes,
 }
 
 /*
- * Stream STR video sectors from the active disc directly to sceGu texture at 15 fps
+ * Stream STR video sectors from the active disc directly into VRAM / display at 15 fps
  */
 int PspStr_StreamVideo(uint32_t start_lba, uint32_t sector_count,
                        void *dst_texture, int tex_width, int tex_height, int is_16bit)
 {
+    if (!s_vlc_table_initialized) {
+        MdecDiag_ExpandDecoderTable(s_vlc_decoder_table);
+        s_vlc_table_initialized = 1;
+    }
+
     uint8_t sector_raw[PSP_CDROM_SECTOR_RAW];
-    uint8_t frame_buffer[65536]; /* 64 KB compressed frame chunk accumulator */
+    static uint8_t frame_buffer[65536];
+    static uint16_t rle_buffer[65536];
     size_t  frame_bytes = 0;
     uint32_t current_lba = start_lba;
     uint32_t end_lba = start_lba + sector_count;
+    uint32_t frames_rendered = 0;
+
+    fprintf(stderr, "[PSP_STR] Starting video playback from LBA %u (%u sectors, %dx%d, %s)\n",
+            (unsigned)start_lba, (unsigned)sector_count, tex_width, tex_height,
+            is_16bit ? "16-bit" : "24-bit");
+
+    /* Set up 24-bit or 16-bit DISPENV */
+    DISPENV env;
+    SetDefDispEnv(&env, 0, 0, tex_width, tex_height);
+    env.isrgb24 = is_16bit ? 0 : 1;
+    PutDispEnv(&env);
 
     while (current_lba < end_lba) {
         if (!PspCdrom_ReadRawSector(current_lba++, sector_raw)) {
             break;
         }
 
-        /* Check Form 2 Submode byte at offset 18 */
         uint8_t submode = sector_raw[18];
 
         /* Check for XA Audio sector (submode bit 0x04) */
         if (submode & 0x04u) {
-            /* Hand audio to SPU CD streaming queue */
             PspAudio_PushCdAudio((const int16_t *)(sector_raw + 24), 2016 / 4);
             continue;
         }
@@ -1379,33 +1731,60 @@ int PspStr_StreamVideo(uint32_t start_lba, uint32_t sector_count,
             if (magic == 0x0160u) {
                 uint16_t chunk_idx   = (uint16_t)(payload[4] | (payload[5] << 8));
                 uint16_t num_chunks  = (uint16_t)(payload[6] | (payload[7] << 8));
-                uint32_t chunk_bytes = (uint32_t)(payload[12] | (payload[13] << 8) |
-                                                 (payload[14] << 16) | (payload[15] << 24));
+                uint32_t frame_size  = (uint32_t)(payload[12] | (payload[13] << 8) |
+                                                  (payload[14] << 16) | (payload[15] << 24));
 
                 if (chunk_idx == 0) {
                     frame_bytes = 0;
+                    memset(frame_buffer, 0, sizeof(frame_buffer));
                 }
 
-                if (frame_bytes + chunk_bytes <= sizeof(frame_buffer)) {
-                    memcpy(frame_buffer + frame_bytes, payload + 32, chunk_bytes);
-                    frame_bytes += chunk_bytes;
+                uint32_t chunk_off = (uint32_t)chunk_idx * 2016u;
+                if (chunk_off < frame_size) {
+                    uint32_t take = frame_size - chunk_off;
+                    if (take > 2016u) take = 2016u;
+                    if (chunk_off + take <= sizeof(frame_buffer)) {
+                        memcpy(frame_buffer + chunk_off, payload + 32, take);
+                        if (chunk_off + take > frame_bytes) {
+                            frame_bytes = chunk_off + take;
+                        }
+                    }
                 }
 
                 /* Complete frame assembled */
                 if (chunk_idx + 1u == num_chunks && frame_bytes > 0) {
-                    PspStr_DecodeFrame(frame_buffer, frame_bytes, dst_texture,
+                    /* 1. Unpack Huffman VLC stream into RLE buffer */
+                    memset(rle_buffer, 0, sizeof(rle_buffer));
+                    DecDCTvlcSize2(0);
+                    DecDCTvlc2((void *)frame_buffer, (void *)rle_buffer, (void *)s_vlc_decoder_table);
+
+                    /* 2. Decode RLE macroblocks directly into shadow VRAM */
+                    PspStr_DecodeFrame((const uint8_t *)rle_buffer, sizeof(rle_buffer),
+                                       dst_texture ? dst_texture : g_ps1_vram,
                                        tex_width, tex_height, is_16bit);
 
-                    /* Write back D-cache for sceGu texture usage */
-                    sceKernelDcacheWritebackInvalidateRange(dst_texture, (unsigned int)(tex_width * tex_height * (is_16bit ? 2 : 4)));
+                    /* 3. Render authentic 4:3 362x272 centered viewport and present */
+                    PspGpu_DrawOTag(NULL, 0);
+                    VSync(0);
+                    frames_rendered++;
 
-                    /* 15 fps movie delay: ~66 ms per frame */
-                    SDL_Delay(66);
+                    if (frames_rendered == 1) {
+                        fprintf(stderr, "[PSP_STR] Rendered first authentic STR frame in 4:3 (362x272, %s)\n",
+                                is_16bit ? "16-bit" : "24-bit");
+                    }
+
                     frame_bytes = 0;
                 }
             }
         }
     }
 
+    /* Restore authentic 16-bit DISPENV after video streaming */
+    DISPENV env_end;
+    SetDefDispEnv(&env_end, 0, 0, tex_width, tex_height);
+    env_end.isrgb24 = 0;
+    PutDispEnv(&env_end);
+
+    fprintf(stderr, "[PSP_STR] Video stream finished: %u frames rendered\n", (unsigned)frames_rendered);
     return 1;
 }

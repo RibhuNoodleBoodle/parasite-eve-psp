@@ -39,6 +39,9 @@ extern "C" {
 #define PS1_VRAM_PIXELS         (PS1_VRAM_WIDTH * PS1_VRAM_HEIGHT)
 #define PS1_VRAM_BYTES          (PS1_VRAM_PIXELS * 2)
 
+extern uint16_t g_ps1_vram[PS1_VRAM_PIXELS];
+void psp_render_vram_dispenv(void);
+
 #define PS1_NATIVE_WIDTH        320
 #define PS1_NATIVE_HEIGHT       240
 

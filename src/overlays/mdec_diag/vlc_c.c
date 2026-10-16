@@ -250,11 +250,19 @@ PSYQ_ASM_FUNCTION(DecDCTvlc2,
     "    b       .L8010CB94\n"
     "    addi    $a1, $a1, 0x2\n"
     ".L8010CBAC:\n"
+#if defined(__psp__) || defined(ENABLE_PSP)
+    "    nop\n"
+    "    nop\n"
+    "    nop\n"
+    "    nop\n"
+    "    nop\n"
+#else
     "    mfc0    $t1, $12\n"
     "    nop\n"
     "    lui     $at, 0x2\n"
     "    or      $t1, $t1, $at\n"
     "    mtc0    $t1, $12\n"
+#endif
     "    jr      $ra\n"
     "    add     $v0, $zero, $zero\n"
     ".L8010CBC8:\n"

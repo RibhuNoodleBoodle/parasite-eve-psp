@@ -1,6 +1,10 @@
 #include "common.h"
-
+#include <stdint.h>
 #include "vlc_build_externs.h"
+
+uint32_t g_MdecVlc2SizeLimit = 0x00FFFFFFu;
+uint32_t g_MdecVlc2SavedState[9] = {0};
+uint32_t g_MdecVlc2FrameEnd = 0;
 
 void MdecDiag_ExpandDecoderTable(u16 *table) {
     s32 distance = 0;

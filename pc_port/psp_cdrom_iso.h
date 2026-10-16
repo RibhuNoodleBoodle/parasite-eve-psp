@@ -188,6 +188,27 @@ int DS_lastmode(void);
 struct CdlLOC *DS_lastpos(void);
 struct CdlLOC *DsLastPos(struct CdlLOC *destination);
 
+/* PS1 Psy-Q Streaming (St*) & MDEC (DecDCT*) API */
+void StSetRing(u32 *ring_addr, u32 ring_size);
+void StClearRing(void);
+void StUnSetRing(void);
+void StSetStream(u32 mode, u32 startFrame, u32 endFrame, void (*callback1)(void), void (*callback2)(void));
+u32  StGetNext(u32 **addr, u32 **header);
+u32  StFreeRing(u32 *ptr);
+int  StGetBackloc(CdlLOC *loc);
+
+void DecDCTReset(int mode);
+void DecDCTvlc(void *bs, void *buf);
+void DecDCTvlc2(void *bs, void *buf, void *vlc_table);
+void DecDCTvlcSize(u32 size);
+void DecDCTvlcSize2(u32 size);
+void DecDCTin(void *buf, s32 mode);
+void DecDCTout(void *buf, u32 size);
+void DecDCToutCallback(void *callback);
+void DecDCTinCallback(void *callback);
+s32  DecDCToutSync(s32 mode);
+s32  DecDCTinSync(s32 mode);
+
 #ifdef __cplusplus
 }
 #endif
