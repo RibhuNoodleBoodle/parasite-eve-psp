@@ -104,6 +104,12 @@ static const uint8_t s_zigzag[64] = {
     53, 60, 61, 54, 47, 55, 62, 63
 };
 
+static uint32_t  s_st_stream_lba = 0;
+#define PUMP_BATCH_SECTORS 32
+static uint8_t   s_pump_sectors[PUMP_BATCH_SECTORS * PSP_CDROM_SECTOR_RAW];
+static uint32_t  s_pump_lba_start = 0xFFFFFFFFu;
+static uint32_t  s_pump_sectors_loaded = 0;
+
 /* ── Asynchronous Background CD-ROM Reader Thread ────────────────────────────── */
 
 static int cdrom_worker_thread(void *arg)
@@ -598,7 +604,7 @@ int PspCdrom_SeekLba(uint32_t lba)
     SDL_LockMutex(s_cd.lock);
     s_cd.target_lba = lba;
     s_cd.seeking = 1;
-    s_cd.status |= PSP_CD_STAT_SEEKING;
+    s_cd.status |= (PSP_CD_STAT_SEEKING | PSP_CD_STAT_READING);
     SDL_CondSignal(s_cd.cond_space_avail);
     SDL_UnlockMutex(s_cd.lock);
 
@@ -720,6 +726,9 @@ int CdControl(unsigned char com, unsigned char *param, unsigned char *result)
         if (param) {
             uint32_t lba = (uint32_t)CdPosToInt((CdlLOC *)param);
             s_cd.current_lba = lba;
+            s_st_stream_lba = lba;
+            s_pump_lba_start = 0xFFFFFFFFu;
+            s_pump_sectors_loaded = 0;
             PspCdrom_SeekLba(lba);
         }
         return 1;
@@ -728,6 +737,9 @@ int CdControl(unsigned char com, unsigned char *param, unsigned char *result)
         if (param) {
             uint32_t lba = (uint32_t)CdPosToInt((CdlLOC *)param);
             s_cd.current_lba = lba;
+            s_st_stream_lba = lba;
+            s_pump_lba_start = 0xFFFFFFFFu;
+            s_pump_sectors_loaded = 0;
             PspCdrom_SeekLba(lba);
         }
         s_cd.status = 0x02; /* CdlStatStandby */
@@ -1167,11 +1179,11 @@ static inline int32_t signed_10bit(uint16_t val)
 
 static void init_idct_table(void)
 {
-    for (int y = 0; y < 8; y++) {
+    for (int u = 0; u < 8; u++) {
+        double c = (u == 0) ? (1.0 / (2.0 * 1.4142135623730951)) : 0.5;
         for (int x = 0; x < 8; x++) {
-            double c = (y == 0) ? 0.7071067811865475 : 1.0;
-            double val = c * cos((2.0 * x + 1.0) * y * 3.141592653589793 / 16.0);
-            s_mdec.idct_scale[x + y * 8] = (int16_t)(val * 4096.0 + 0.5);
+            double val = c * cos((2.0 * x + 1.0) * u * 3.141592653589793 / 16.0);
+            s_mdec.idct_scale[x + u * 8] = (int16_t)(val * 2048.0 + (val >= 0 ? 0.5 : -0.5));
         }
     }
 }
@@ -1207,28 +1219,44 @@ void PspMdec_SetQuantTables(const uint8_t *luma_quant, const uint8_t *chroma_qua
  */
 static void mdec_idct_8x8(int32_t block[64])
 {
+    /* Fast path for DC-only blocks */
+    int has_ac = 0;
+    for (int i = 1; i < 64; i++) {
+        if (block[i] != 0) { has_ac = 1; break; }
+    }
+    if (!has_ac) {
+        int32_t dc = clamp_val((block[0] + 4) >> 3, -256, 255);
+        for (int i = 0; i < 64; i++) block[i] = dc;
+        return;
+    }
+
     int32_t temp[64];
 
-    /* Pass 1: Columns */
+    /* Pass 1: Columns (frequency u -> spatial y) */
     for (int x = 0; x < 8; x++) {
         for (int y = 0; y < 8; y++) {
-            int64_t sum = 0;
-            for (int z = 0; z < 8; z++) {
-                sum += (int64_t)block[x + z * 8] * (s_mdec.idct_scale[y + z * 8] >> 3);
+            int32_t sum = 0;
+            for (int u = 0; u < 8; u++) {
+                int32_t b = block[x + u * 8];
+                if (b != 0) {
+                    sum += b * s_mdec.idct_scale[y + u * 8];
+                }
             }
-            temp[x + y * 8] = (int32_t)((sum + 4095) >> 13);
+            temp[x + y * 8] = (sum + 1024) >> 11;
         }
     }
 
-    /* Pass 2: Rows */
+    /* Pass 2: Rows (frequency u -> spatial x) */
     for (int y = 0; y < 8; y++) {
         for (int x = 0; x < 8; x++) {
-            int64_t sum = 0;
-            for (int z = 0; z < 8; z++) {
-                sum += (int64_t)temp[z + y * 8] * (s_mdec.idct_scale[x + z * 8] >> 3);
+            int32_t sum = 0;
+            for (int u = 0; u < 8; u++) {
+                int32_t t = temp[u + y * 8];
+                if (t != 0) {
+                    sum += t * s_mdec.idct_scale[x + u * 8];
+                }
             }
-            int32_t val = (int32_t)((sum + 4095) >> 13);
-            /* Clamp to 9-bit signed */
+            int32_t val = (sum + 1024) >> 11;
             block[x + y * 8] = clamp_val(val, -256, 255);
         }
     }
@@ -1243,9 +1271,11 @@ static int decode_block(const uint16_t *input, size_t input_words, size_t *pos,
     memset(block, 0, 64 * sizeof(int32_t));
     if (*pos >= input_words) return 0;
 
-    /* Skip leading EOB or padding */
-    while (*pos < input_words && input[*pos] == 0xFE00u) (*pos)++;
-    if (*pos >= input_words) return 0;
+    /* If block is completely empty (EOB marker only) */
+    if (input[*pos] == 0xFE00u) {
+        (*pos)++;
+        return 1;
+    }
 
     uint16_t code = input[(*pos)++];
     unsigned scale = code >> 10u;
@@ -1261,7 +1291,7 @@ static int decode_block(const uint16_t *input, size_t input_words, size_t *pos,
             val = (int32_t)(((int64_t)val * quant[k] * scale + 4) >> 3);
         }
 
-        block[scale ? s_zigzag[k] : k] = clamp_val(val, -1024, 1023);
+        block[s_zigzag[k]] = clamp_val(val, -1024, 1023);
 
         if (*pos >= input_words) break;
         code = input[(*pos)++];
@@ -1295,7 +1325,6 @@ static StHEADER *s_st_ring_addr = NULL;
 static uint32_t  s_st_ring_size = 0;
 static uint32_t  s_st_read_slot = 0;
 static uint32_t  s_st_write_slot = 0;
-static uint32_t  s_st_stream_lba = 0;
 static int       s_st_stream_active = 0;
 static void    (*s_st_end_callback)(void) = NULL;
 
@@ -1317,6 +1346,8 @@ void StClearRing(void)
 {
     s_st_read_slot = 0;
     s_st_write_slot = 0;
+    s_pump_lba_start = 0xFFFFFFFFu;
+    s_pump_sectors_loaded = 0;
     if (s_st_ring_addr && s_st_ring_size > 0) {
         memset(s_st_ring_addr, 0, s_st_ring_size * sizeof(StHEADER));
     }
@@ -1335,6 +1366,8 @@ void StSetStream(u32 mode, u32 startFrame, u32 endFrame, void (*callback1)(void)
     (void)callback2;
     s_st_stream_active = 1;
     s_st_end_callback = callback1;
+    s_pump_lba_start = 0xFFFFFFFFu;
+    s_pump_sectors_loaded = 0;
 }
 
 int StGetBackloc(CdlLOC *loc)
@@ -1353,7 +1386,6 @@ static void psp_str_pump_sectors(void)
 {
     if (!s_st_ring_addr || s_st_ring_size == 0) return;
 
-    uint8_t sector_raw[PSP_CDROM_SECTOR_RAW];
     static uint8_t s_frame_payloads[32][2016];
     static uint8_t s_frame_headers[32][32];
     static uint32_t s_asm_frame = 0;
@@ -1363,9 +1395,26 @@ static void psp_str_pump_sectors(void)
 
     int max_sectors = 40;
     while (max_sectors-- > 0) {
-        if (!PspCdrom_ReadRawSector(s_st_stream_lba++, sector_raw)) {
-            break;
+        if (s_st_stream_lba < s_pump_lba_start || s_st_stream_lba >= s_pump_lba_start + s_pump_sectors_loaded) {
+            uint32_t stride = (s_cd.sector_stride > 0) ? s_cd.sector_stride : PSP_CDROM_SECTOR_RAW;
+            uint32_t to_read = PUMP_BATCH_SECTORS;
+            if (s_st_stream_lba + to_read > s_cd.total_sectors) {
+                to_read = (s_st_stream_lba < s_cd.total_sectors) ? (s_cd.total_sectors - s_st_stream_lba) : 0;
+            }
+            if (to_read == 0) break;
+
+            SDL_LockMutex(s_cd.lock);
+            sceIoLseek(s_cd.fd, (SceOff)s_st_stream_lba * stride, PSP_SEEK_SET);
+            int n = sceIoRead(s_cd.fd, s_pump_sectors, to_read * stride);
+            SDL_UnlockMutex(s_cd.lock);
+            if (n <= 0) break;
+            s_pump_lba_start = s_st_stream_lba;
+            s_pump_sectors_loaded = (uint32_t)(n / stride);
+            if (s_pump_sectors_loaded == 0) break;
         }
+
+        const uint8_t *sector_raw = s_pump_sectors + ((s_st_stream_lba - s_pump_lba_start) * PSP_CDROM_SECTOR_RAW);
+        s_st_stream_lba++;
 
         uint8_t submode = sector_raw[18];
 
@@ -1545,15 +1594,25 @@ void DecDCTin(void *buf, s32 mode)
 
 void DecDCTout(void *buf, u32 size)
 {
-    (void)size;
     if (!buf) return;
 
     int is_16bit = (s_mdec_depth == 3);
     int mb_x = s_mdec_slice_col;
 
+    int mb_rows = s_mdec_mb_rows;
+    if (size > 0) {
+        if (is_16bit) {
+            int r = (int)(size / 128u);
+            if (r > 0 && r <= 32) mb_rows = r;
+        } else {
+            int r = (int)(size / 192u);
+            if (r > 0 && r <= 32) mb_rows = r;
+        }
+    }
+
     if (mb_x < s_mdec_mb_cols && s_mdec_input_words) {
         int32_t mb_blocks[6][64];
-        for (int mb_y = 0; mb_y < s_mdec_mb_rows; mb_y++) {
+        for (int mb_y = 0; mb_y < mb_rows; mb_y++) {
             /* Decode Cr (block 0) and Cb (block 1) */
             if (decode_block(s_mdec_input_words, s_mdec_input_word_count, &s_mdec_word_pos, mb_blocks[0], s_mdec.quant_chroma) &&
                 decode_block(s_mdec_input_words, s_mdec_input_word_count, &s_mdec_word_pos, mb_blocks[1], s_mdec.quant_chroma)) {
@@ -1694,7 +1753,10 @@ int PspStr_StreamVideo(uint32_t start_lba, uint32_t sector_count,
         s_vlc_table_initialized = 1;
     }
 
-    uint8_t sector_raw[PSP_CDROM_SECTOR_RAW];
+    #define STR_BATCH_SECTORS 32
+    static uint8_t s_batch_sectors[STR_BATCH_SECTORS * PSP_CDROM_SECTOR_RAW];
+    uint32_t batch_lba_start = 0xFFFFFFFFu;
+    uint32_t batch_sectors_loaded = 0;
     static uint8_t frame_buffer[65536];
     static uint16_t rle_buffer[65536];
     size_t  frame_bytes = 0;
@@ -1713,9 +1775,22 @@ int PspStr_StreamVideo(uint32_t start_lba, uint32_t sector_count,
     PutDispEnv(&env);
 
     while (current_lba < end_lba) {
-        if (!PspCdrom_ReadRawSector(current_lba++, sector_raw)) {
-            break;
+        if (current_lba < batch_lba_start || current_lba >= batch_lba_start + batch_sectors_loaded) {
+            uint32_t to_load = end_lba - current_lba;
+            if (to_load > STR_BATCH_SECTORS) to_load = STR_BATCH_SECTORS;
+            uint32_t stride = (s_cd.sector_stride > 0) ? s_cd.sector_stride : PSP_CDROM_SECTOR_RAW;
+            SDL_LockMutex(s_cd.lock);
+            sceIoLseek(s_cd.fd, (SceOff)current_lba * stride, PSP_SEEK_SET);
+            int n = sceIoRead(s_cd.fd, s_batch_sectors, to_load * stride);
+            SDL_UnlockMutex(s_cd.lock);
+            if (n <= 0) break;
+            batch_lba_start = current_lba;
+            batch_sectors_loaded = (uint32_t)(n / stride);
+            if (batch_sectors_loaded == 0) break;
         }
+
+        const uint8_t *sector_raw = s_batch_sectors + ((current_lba - batch_lba_start) * PSP_CDROM_SECTOR_RAW);
+        current_lba++;
 
         uint8_t submode = sector_raw[18];
 

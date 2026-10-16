@@ -246,6 +246,7 @@ DISPENV *PspGpu_SetDefDispEnv(DISPENV *env, int x, int y, int w, int h);
 uint16_t *PspGpu_GetVramPointer(void);
 void PspGpu_InvalidateVramRange(uint32_t x, uint32_t y, uint32_t w, uint32_t h);
 void psp_write_ppm_screenshot(const char *path, const uint16_t *fb);
+uint32_t PspGpu_GetFrameCounter(void);
 
 /* PS1 Psy-Q Standard API Declarations */
 int  DrawSync(int mode);

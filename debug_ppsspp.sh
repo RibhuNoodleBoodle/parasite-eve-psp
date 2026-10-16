@@ -103,9 +103,10 @@ PRINTF = 6
 EOF
 
 echo ""
-RUN_TIMEOUT="${RUN_TIMEOUT:-20s}"
+RUN_TIMEOUT="${RUN_TIMEOUT:-40s}"
 echo "=== [Step 3] Running Portable PPSSPP AppImage (${RUN_TIMEOUT} timeout) ==="
 rm -f "$LOG_FILE" "$PPSSPP_DIR/ probe"*.log 2>/dev/null || true
+rm -f "$ROOT_DIR"/frame_dump*.ppm "$ROOT_DIR/dist"/frame_dump*.ppm "$ROOT_DIR/dist/PSP/GAME/ParasiteEve"/frame_dump*.ppm "$PPSSPP_DIR"/frame_dump*.ppm "$PPSSPP_DIR/.config/ppsspp"/frame_dump*.ppm 2>/dev/null || true
 touch "$ROOT_DIR/dist/PSP/GAME/ParasiteEve/frame_dump_enable.flag" 2>/dev/null || true
 touch "$MEMSTICK_GAME_DIR/frame_dump_enable.flag" 2>/dev/null || true
 
@@ -123,13 +124,15 @@ fi
 rm -f "$ROOT_DIR/dist/PSP/GAME/ParasiteEve/frame_dump_enable.flag" "$MEMSTICK_GAME_DIR/frame_dump_enable.flag" 2>/dev/null || true
 rm -f "$ROOT_DIR/dist/PSP/GAME/ParasiteEve/autotest.flag" "$MEMSTICK_GAME_DIR/autotest.flag" 2>/dev/null || true
 
-# Sync frame_dump.ppm, frame_dump_logo.ppm, frame_dump_carnegie.ppm, and frame_dump_str.ppm into .ppsspp/, dist/, and project root
-for ppm_name in "frame_dump.ppm" "frame_dump_logo.ppm" "frame_dump_carnegie.ppm" "frame_dump_str.ppm"; do
+# Sync frame dumps into .ppsspp/, dist/, and project root
+for ppm_name in "frame_dump.ppm" "frame_dump_logo.ppm" "frame_dump_intro_fmv.ppm" "frame_dump_title.ppm" "frame_dump_newgame.ppm" "frame_dump_carnegie.ppm" "frame_dump_str.ppm"; do
     for candidate_ppm in \
-        "$PPSSPP_DIR/.config/ppsspp/$ppm_name" \
-        "$PPSSPP_DIR/.config/ppsspp/PSP/GAME/ParasiteEve/$ppm_name" \
+        "$ROOT_DIR/$ppm_name" \
         "$ROOT_DIR/dist/$ppm_name" \
-        "$ROOT_DIR/dist/PSP/GAME/ParasiteEve/$ppm_name"; do
+        "$ROOT_DIR/dist/PSP/GAME/ParasiteEve/$ppm_name" \
+        "$PPSSPP_DIR/$ppm_name" \
+        "$PPSSPP_DIR/.config/ppsspp/$ppm_name" \
+        "$PPSSPP_DIR/.config/ppsspp/PSP/GAME/ParasiteEve/$ppm_name"; do
         if [[ -f "$candidate_ppm" ]]; then
             cp -f "$candidate_ppm" "$PPSSPP_DIR/$ppm_name"
             cp -f "$candidate_ppm" "$ROOT_DIR/dist/PSP/GAME/ParasiteEve/$ppm_name"
@@ -157,6 +160,12 @@ grep -E "IoFileMgr|sceIoOpen|sceIoRead|Host0 path" "$LOG_FILE" | head -n 30 || e
 echo ""
 echo "--- Errors & Exceptions (ERROR / Exception) ---"
 grep -E "ERROR|Exception|FATAL|ERRNO_FILE_NOT_FOUND|E\[LOADER\]|E\[BOOT\]" "$LOG_FILE" | head -n 30 || echo "No errors or exceptions found."
+
+echo ""
+echo "--- Running Anti-Cheat Frame Verification (verify_frames.py) ---"
+if [[ -f "$ROOT_DIR/verify_frames.py" ]]; then
+    python3 "$ROOT_DIR/verify_frames.py"
+fi
 
 echo ""
 echo "=== Telemetry Analysis Complete ==="

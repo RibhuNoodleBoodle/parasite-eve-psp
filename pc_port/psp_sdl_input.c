@@ -7,6 +7,7 @@
  */
 
 #include "psp_sdl_input.h"
+#include "psp_gpu_gu.h"
 
 #include <SDL/SDL.h>
 #if defined(__psp__) || defined(ENABLE_PSP)
@@ -209,19 +210,34 @@ void PspInput_Poll(void)
          * Staged Auto-Input Timeline:
          * Frame 1..419: Zero synthetic input (Square EA notice & Intro FMV stream freely).
          * Frame 420..425: Single START pulse to skip Intro FMV to Title screen.
-         * Frame 426..519: Zero synthetic input (Title screen displays).
-         * Frame 520..530: Single CROSS pulse to confirm NEW GAME.
+         * Frame 426..619: Zero synthetic input (Title screen displays and dumps frame_dump_title.ppm at frame 580).
+         * Frame 620..625: Single START pulse to open "NEW GAME / CONTINUE" menu.
+         * Frame 626..699: Zero synthetic input (menu displays).
+         * Frame 700..705: Single CROSS pulse to confirm NEW GAME.
          */
-        if (s_poll_counter >= 420 && s_poll_counter <= 425) {
+        uint32_t current_frame = PspGpu_GetFrameCounter();
+        static uint32_t s_last_injected_start1 = 0;
+        static uint32_t s_last_injected_start2 = 0;
+        static uint32_t s_last_injected_cross = 0;
+        if (current_frame >= 420 && current_frame <= 425) {
             buttons |= HOST_PAD_START;
-            if (s_poll_counter == 420) {
-                fprintf(stderr, "[NEW-GAME-TRACE] Auto-input: START injected to skip Intro FMV (frame %u)\n", (unsigned)s_poll_counter);
+            if (s_last_injected_start1 != current_frame) {
+                s_last_injected_start1 = current_frame;
+                fprintf(stderr, "[NEW-GAME-TRACE] Auto-input: START injected to skip Intro FMV (frame %u)\n", (unsigned)current_frame);
             }
         }
-        if (s_poll_counter >= 520 && s_poll_counter <= 530) {
+        if (current_frame >= 620 && current_frame <= 625) {
+            buttons |= HOST_PAD_START;
+            if (s_last_injected_start2 != current_frame) {
+                s_last_injected_start2 = current_frame;
+                fprintf(stderr, "[NEW-GAME-TRACE] Auto-input: START injected to open NEW GAME menu (frame %u)\n", (unsigned)current_frame);
+            }
+        }
+        if (current_frame >= 700 && current_frame <= 705) {
             buttons |= HOST_PAD_CROSS;
-            if (s_poll_counter == 520) {
-                fprintf(stderr, "[NEW-GAME-TRACE] Auto-input: CROSS injected for NEW GAME (frame %u)\n", (unsigned)s_poll_counter);
+            if (s_last_injected_cross != current_frame) {
+                s_last_injected_cross = current_frame;
+                fprintf(stderr, "[NEW-GAME-TRACE] Auto-input: CROSS injected for NEW GAME (frame %u)\n", (unsigned)current_frame);
             }
         }
     }

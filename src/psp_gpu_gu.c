@@ -1475,58 +1475,68 @@ int VSync(int mode) {
 
     extern int g_SceneDispatchToken;
     int is_carnegie = ((uint32_t)g_SceneDispatchToken == 0xA8000148u);
-    if ((g_psp_gpu.frame_counter % 60 == 0) || is_carnegie) {
+    static int s_dump_checked = 0;
+    static int s_enable_frame_dump = 0;
+    static int s_dumped_logo = 0;
+    static int s_dumped_intro = 0;
+    static int s_dumped_title = 0;
+    static int s_dumped_newgame = 0;
+    static int s_dumped_carnegie = 0;
+
+    if (!s_dump_checked) {
+        s_dump_checked = 1;
+        SceUID fd = sceIoOpen("frame_dump_enable.flag", PSP_O_RDONLY, 0777);
+        if (fd < 0) {
+            fd = sceIoOpen("ms0:/PSP/GAME/ParasiteEve/frame_dump_enable.flag", PSP_O_RDONLY, 0777);
+        }
+        if (fd >= 0) {
+            s_enable_frame_dump = 1;
+            sceIoClose(fd);
+        }
+    }
+
+    int is_log_frame = (g_psp_gpu.frame_counter % 60 == 0);
+    int should_dump_logo = (s_enable_frame_dump && g_psp_gpu.frame_counter >= 55 && g_psp_gpu.frame_counter <= 65 && !s_dumped_logo);
+    int should_dump_intro = (s_enable_frame_dump && g_psp_gpu.frame_counter >= 340 && g_psp_gpu.frame_counter <= 360 && !s_dumped_intro);
+    int should_dump_title = (s_enable_frame_dump && g_psp_gpu.frame_counter >= 575 && g_psp_gpu.frame_counter <= 590 && !s_dumped_title);
+    int should_dump_newgame = (s_enable_frame_dump && ((g_psp_gpu.frame_counter >= 850 && g_psp_gpu.frame_counter <= 950) || is_carnegie) && !s_dumped_newgame);
+    int should_dump_carnegie = (s_enable_frame_dump && is_carnegie && !s_dumped_carnegie);
+
+    if (is_log_frame || should_dump_logo || should_dump_intro || should_dump_title || should_dump_newgame || should_dump_carnegie) {
         uint32_t vram_nonzero = 0;
         for (int p = 0; p < PS1_VRAM_PIXELS; p++) {
             if (g_ps1_vram[p] != 0) vram_nonzero++;
         }
 
-        static int s_dump_checked = 0;
-        static int s_enable_frame_dump = 0;
-        if (!s_dump_checked) {
-            s_dump_checked = 1;
-            SceUID fd = sceIoOpen("frame_dump_enable.flag", PSP_O_RDONLY, 0777);
-            if (fd < 0) {
-                fd = sceIoOpen("ms0:/PSP/GAME/ParasiteEve/frame_dump_enable.flag", PSP_O_RDONLY, 0777);
-            }
-            if (fd >= 0) {
-                s_enable_frame_dump = 1;
-                sceIoClose(fd);
+        uint16_t *edram_disp = (uint16_t *)((uintptr_t)0x44000000u + (uintptr_t)g_psp_gpu.disp_buffer);
+        uint32_t disp_nonblack = 0;
+
+        int disp_w = (g_psp_gpu.current_dispenv.disp.w > 0) ? g_psp_gpu.current_dispenv.disp.w : 320;
+        int disp_h = (g_psp_gpu.current_dispenv.disp.h > 0) ? g_psp_gpu.current_dispenv.disp.h : 240;
+        for (int y = 0; y < PSP_SCREEN_HEIGHT; y++) {
+            int src_y = (y * disp_h) / PSP_SCREEN_HEIGHT;
+            for (int x = 0; x < PSP_SCREEN_WIDTH; x++) {
+                uint16_t out_pix = 0x8000u;
+                if (x >= 59 && x < 59 + 362) {
+                    int src_x = ((x - 59) * disp_w) / 362;
+                    if (g_psp_gpu.current_dispenv.isrgb24) {
+                        uint32_t c32 = s_dispenv_tex32[src_y * 512 + src_x];
+                        uint8_t r = (uint8_t)(c32 & 0xFF);
+                        uint8_t g = (uint8_t)((c32 >> 8) & 0xFF);
+                        uint8_t b = (uint8_t)((c32 >> 16) & 0xFF);
+                        out_pix = (uint16_t)(((b >> 3) << 10) | ((g >> 3) << 5) | (r >> 3) | 0x8000u);
+                    } else {
+                        out_pix = s_dispenv_tex[src_y * 512 + src_x];
+                    }
+                }
+                edram_disp[y * PSP_BUFFER_STRIDE + x] = out_pix;
+                if ((out_pix & 0x7FFFu) != 0) {
+                    disp_nonblack++;
+                }
             }
         }
 
-        if (s_enable_frame_dump && g_psp_gpu.frame_counter <= 600) {
-            uint16_t *edram_disp = (uint16_t *)((uintptr_t)0x44000000u + (uintptr_t)g_psp_gpu.disp_buffer);
-            uint32_t disp_nonblack = 0;
-
-            /* Populate the 480x272 CPU EDRAM display buffer with the current frame's
-             * 4:3 (362x272 at X=59..420) decoded DISPENV & SPRT output so both EDRAM
-             * telemetry and .ppm screenshot dumps reflect the exact rendered frame. */
-            int disp_w = (g_psp_gpu.current_dispenv.disp.w > 0) ? g_psp_gpu.current_dispenv.disp.w : 320;
-            int disp_h = (g_psp_gpu.current_dispenv.disp.h > 0) ? g_psp_gpu.current_dispenv.disp.h : 240;
-            for (int y = 0; y < PSP_SCREEN_HEIGHT; y++) {
-                int src_y = (y * disp_h) / PSP_SCREEN_HEIGHT;
-                for (int x = 0; x < PSP_SCREEN_WIDTH; x++) {
-                    uint16_t out_pix = 0x8000u;
-                    if (x >= 59 && x < 59 + 362) {
-                        int src_x = ((x - 59) * disp_w) / 362;
-                        if (g_psp_gpu.current_dispenv.isrgb24) {
-                            uint32_t c32 = s_dispenv_tex32[src_y * 512 + src_x];
-                            uint8_t r = (uint8_t)(c32 & 0xFF);
-                            uint8_t g = (uint8_t)((c32 >> 8) & 0xFF);
-                            uint8_t b = (uint8_t)((c32 >> 16) & 0xFF);
-                            out_pix = (uint16_t)(((b >> 3) << 10) | ((g >> 3) << 5) | (r >> 3) | 0x8000u);
-                        } else {
-                            out_pix = s_dispenv_tex[src_y * 512 + src_x];
-                        }
-                    }
-                    edram_disp[y * PSP_BUFFER_STRIDE + x] = out_pix;
-                    if ((out_pix & 0x7FFFu) != 0) {
-                        disp_nonblack++;
-                    }
-                }
-            }
-
+        if (is_log_frame) {
             char log_buf[192];
             int log_len = snprintf(log_buf, sizeof(log_buf),
                 "[VRAM-CHECK] Frame %u: Non-zero texels: %u, Display non-black pixels: %u, OT primitives drawn: %u\n",
@@ -1537,45 +1547,34 @@ int VSync(int mode) {
             if (log_len > 0) {
                 sceIoWrite(2, log_buf, (SceSize)log_len);
             }
+        }
 
-            if (g_psp_gpu.frame_counter == 60) {
-                psp_write_ppm_screenshot("ms0:/frame_dump_logo.ppm", edram_disp);
-                psp_write_ppm_screenshot("frame_dump_logo.ppm", edram_disp);
-            }
-            if (g_psp_gpu.frame_counter >= 340 && g_psp_gpu.frame_counter <= 360) {
-                static int s_dumped_intro = 0;
-                if (!s_dumped_intro) {
-                    s_dumped_intro = 1;
-                    psp_write_ppm_screenshot("ms0:/frame_dump_intro_fmv.ppm", edram_disp);
-                    psp_write_ppm_screenshot("frame_dump_intro_fmv.ppm", edram_disp);
-                }
-            }
-            if (g_psp_gpu.frame_counter >= 475 && g_psp_gpu.frame_counter <= 490) {
-                static int s_dumped_title = 0;
-                if (!s_dumped_title) {
-                    s_dumped_title = 1;
-                    psp_write_ppm_screenshot("ms0:/frame_dump_title.ppm", edram_disp);
-                    psp_write_ppm_screenshot("frame_dump_title.ppm", edram_disp);
-                }
-            }
-            if (g_psp_gpu.frame_counter >= 560 && g_psp_gpu.frame_counter <= 600) {
-                static int s_dumped_newgame = 0;
-                if (!s_dumped_newgame) {
-                    s_dumped_newgame = 1;
-                    psp_write_ppm_screenshot("ms0:/frame_dump_newgame.ppm", edram_disp);
-                    psp_write_ppm_screenshot("frame_dump_newgame.ppm", edram_disp);
-                }
-            }
-            if (is_carnegie && disp_nonblack > 0) {
-                static int s_dumped_carnegie = 0;
-                if (!s_dumped_carnegie) {
-                    s_dumped_carnegie = 1;
-                    psp_write_ppm_screenshot("ms0:/frame_dump_carnegie.ppm", edram_disp);
-                    psp_write_ppm_screenshot("frame_dump_carnegie.ppm", edram_disp);
-                }
-            }
+        if (should_dump_logo) {
+            s_dumped_logo = 1;
+            psp_write_ppm_screenshot("ms0:/frame_dump_logo.ppm", edram_disp);
+            psp_write_ppm_screenshot("frame_dump_logo.ppm", edram_disp);
+        }
+        if (should_dump_intro) {
+            s_dumped_intro = 1;
+            psp_write_ppm_screenshot("ms0:/frame_dump_intro_fmv.ppm", edram_disp);
+            psp_write_ppm_screenshot("frame_dump_intro_fmv.ppm", edram_disp);
             psp_write_ppm_screenshot("ms0:/frame_dump.ppm", edram_disp);
             psp_write_ppm_screenshot("frame_dump.ppm", edram_disp);
+        }
+        if (should_dump_title) {
+            s_dumped_title = 1;
+            psp_write_ppm_screenshot("ms0:/frame_dump_title.ppm", edram_disp);
+            psp_write_ppm_screenshot("frame_dump_title.ppm", edram_disp);
+        }
+        if (should_dump_newgame) {
+            s_dumped_newgame = 1;
+            psp_write_ppm_screenshot("ms0:/frame_dump_newgame.ppm", edram_disp);
+            psp_write_ppm_screenshot("frame_dump_newgame.ppm", edram_disp);
+        }
+        if (should_dump_carnegie && disp_nonblack > 0) {
+            s_dumped_carnegie = 1;
+            psp_write_ppm_screenshot("ms0:/frame_dump_carnegie.ppm", edram_disp);
+            psp_write_ppm_screenshot("frame_dump_carnegie.ppm", edram_disp);
         }
     }
 
@@ -1583,6 +1582,10 @@ int VSync(int mode) {
         s_vsync_callback();
     }
     return 0;
+}
+
+uint32_t PspGpu_GetFrameCounter(void) {
+    return g_psp_gpu.frame_counter;
 }
 
 void ResetGraph(int mode) {
