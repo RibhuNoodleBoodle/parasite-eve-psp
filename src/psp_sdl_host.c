@@ -400,6 +400,97 @@ void PspHost_Delay(uint32_t ms)
     SDL_Delay(ms);
 }
 
+/* Compact 5x7 ASCII font bitmap for PS1 15bpp VRAM buffers (ASCII 32 ' ' to 90 'Z') */
+static const uint8_t s_font5x7[59][5] = {
+    {0x00, 0x00, 0x00, 0x00, 0x00}, /* ' ' */
+    {0x00, 0x00, 0x5F, 0x00, 0x00}, /* '!' */
+    {0x00, 0x07, 0x00, 0x07, 0x00}, /* '"' */
+    {0x14, 0x7F, 0x14, 0x7F, 0x14}, /* '#' */
+    {0x24, 0x2A, 0x7F, 0x2A, 0x12}, /* '$' */
+    {0x23, 0x13, 0x08, 0x64, 0x62}, /* '%' */
+    {0x36, 0x49, 0x55, 0x22, 0x50}, /* '&' */
+    {0x00, 0x05, 0x03, 0x00, 0x00}, /* ''' */
+    {0x00, 0x1C, 0x22, 0x41, 0x00}, /* '(' */
+    {0x00, 0x41, 0x22, 0x1C, 0x00}, /* ')' */
+    {0x14, 0x08, 0x3E, 0x08, 0x14}, /* '*' */
+    {0x08, 0x08, 0x3E, 0x08, 0x08}, /* '+' */
+    {0x00, 0x50, 0x30, 0x00, 0x00}, /* ',' */
+    {0x08, 0x08, 0x08, 0x08, 0x08}, /* '-' */
+    {0x00, 0x60, 0x60, 0x00, 0x00}, /* '.' */
+    {0x20, 0x10, 0x08, 0x04, 0x02}, /* '/' */
+    {0x3E, 0x51, 0x49, 0x45, 0x3E}, /* '0' */
+    {0x00, 0x42, 0x7F, 0x40, 0x00}, /* '1' */
+    {0x42, 0x61, 0x51, 0x49, 0x46}, /* '2' */
+    {0x21, 0x41, 0x45, 0x4B, 0x31}, /* '3' */
+    {0x18, 0x14, 0x12, 0x7F, 0x10}, /* '4' */
+    {0x27, 0x45, 0x45, 0x45, 0x39}, /* '5' */
+    {0x3C, 0x4A, 0x49, 0x49, 0x30}, /* '6' */
+    {0x01, 0x71, 0x09, 0x05, 0x03}, /* '7' */
+    {0x36, 0x49, 0x49, 0x49, 0x36}, /* '8' */
+    {0x06, 0x49, 0x49, 0x29, 0x1E}, /* '9' */
+    {0x00, 0x36, 0x36, 0x00, 0x00}, /* ':' */
+    {0x00, 0x56, 0x36, 0x00, 0x00}, /* ';' */
+    {0x08, 0x14, 0x22, 0x41, 0x00}, /* '<' */
+    {0x14, 0x14, 0x14, 0x14, 0x14}, /* '=' */
+    {0x00, 0x41, 0x22, 0x14, 0x08}, /* '>' */
+    {0x02, 0x01, 0x51, 0x09, 0x06}, /* '?' */
+    {0x32, 0x49, 0x79, 0x41, 0x3E}, /* '@' */
+    {0x7E, 0x11, 0x11, 0x11, 0x7E}, /* 'A' */
+    {0x7F, 0x49, 0x49, 0x49, 0x36}, /* 'B' */
+    {0x3E, 0x41, 0x41, 0x41, 0x22}, /* 'C' */
+    {0x7F, 0x41, 0x41, 0x22, 0x1C}, /* 'D' */
+    {0x7F, 0x49, 0x49, 0x49, 0x41}, /* 'E' */
+    {0x7F, 0x09, 0x09, 0x09, 0x01}, /* 'F' */
+    {0x3E, 0x41, 0x49, 0x49, 0x7A}, /* 'G' */
+    {0x7F, 0x08, 0x08, 0x08, 0x7F}, /* 'H' */
+    {0x00, 0x41, 0x7F, 0x41, 0x00}, /* 'I' */
+    {0x20, 0x40, 0x41, 0x3F, 0x01}, /* 'J' */
+    {0x7F, 0x08, 0x14, 0x22, 0x41}, /* 'K' */
+    {0x7F, 0x40, 0x40, 0x40, 0x40}, /* 'L' */
+    {0x7F, 0x02, 0x04, 0x02, 0x7F}, /* 'M' */
+    {0x7F, 0x04, 0x08, 0x10, 0x7F}, /* 'N' */
+    {0x3E, 0x41, 0x41, 0x41, 0x3E}, /* 'O' */
+    {0x7F, 0x09, 0x09, 0x09, 0x06}, /* 'P' */
+    {0x3E, 0x41, 0x51, 0x21, 0x5E}, /* 'Q' */
+    {0x7F, 0x09, 0x19, 0x29, 0x46}, /* 'R' */
+    {0x46, 0x49, 0x49, 0x49, 0x31}, /* 'S' */
+    {0x01, 0x01, 0x7F, 0x01, 0x01}, /* 'T' */
+    {0x3F, 0x40, 0x40, 0x40, 0x3F}, /* 'U' */
+    {0x1F, 0x20, 0x40, 0x20, 0x1F}, /* 'V' */
+    {0x7F, 0x20, 0x18, 0x20, 0x7F}, /* 'W' */
+    {0x63, 0x14, 0x08, 0x14, 0x63}, /* 'X' */
+    {0x07, 0x08, 0x70, 0x08, 0x07}, /* 'Y' */
+    {0x61, 0x51, 0x49, 0x45, 0x43}, /* 'Z' */
+};
+
+static void draw_text_15bpp(uint16_t *buf, int buf_w, int buf_h, int start_x, int start_y, const char *str, uint16_t color, int scale)
+{
+    int cur_x = start_x;
+    for (size_t s = 0; str[s]; s++) {
+        char ch = str[s];
+        if (ch >= 'a' && ch <= 'z') ch -= 32;
+        if (ch < ' ' || ch > 'Z') { cur_x += 6 * scale; continue; }
+        const uint8_t *glyph = s_font5x7[ch - ' '];
+        for (int col = 0; col < 5; col++) {
+            uint8_t bits = glyph[col];
+            for (int row = 0; row < 7; row++) {
+                if (bits & (1 << row)) {
+                    for (int dy = 0; dy < scale; dy++) {
+                        for (int dx = 0; dx < scale; dx++) {
+                            int px = cur_x + col * scale + dx;
+                            int py = start_y + row * scale + dy;
+                            if (px >= 0 && px < buf_w && py >= 0 && py < buf_h) {
+                                buf[py * buf_w + px] = color;
+                            }
+                        }
+                    }
+                }
+            }
+        }
+        cur_x += 6 * scale;
+    }
+}
+
 void psp_game_start(void)
 {
     fprintf(stderr, "[PSP_HOST] Starting Parasite Eve Title Sequence & Main Menu...\n");
@@ -439,6 +530,11 @@ void psp_game_start(void)
         }
     }
 
+    /* Render authentic Squaresoft and Copyright text onto title screen buffer */
+    draw_text_15bpp(title_tim_buffer, 320, 204, 130, 25, "SQUARESOFT", 0x7FFF | 0x8000, 1);
+    draw_text_15bpp(title_tim_buffer, 320, 204, 98, 125, "- PARASITE EVE -", 0x7E10 | 0x8000, 1);
+    draw_text_15bpp(title_tim_buffer, 320, 204, 64, 180, "(C) 1998 SQUARE CO., LTD.", 0x5AD6 | 0x8000, 1);
+
     RECT title_rect = {0, 20, 320, 204};
     LoadImage(&title_rect, title_tim_buffer);
     DrawSync(0);
@@ -462,6 +558,10 @@ void psp_game_start(void)
         }
     }
 
+    /* Render readable "NEW GAME" and "CONTINUE" text inside the menu box */
+    draw_text_15bpp(menu_overlay_buffer, 320, 64, 118, 16, "NEW GAME", 0x7FFF | 0x8000, 2);
+    draw_text_15bpp(menu_overlay_buffer, 320, 64, 118, 36, "CONTINUE", 0x7FFF | 0x8000, 2);
+
     RECT menu_rect = {0, 240, 320, 64};
     LoadImage(&menu_rect, menu_overlay_buffer);
     DrawSync(0);
@@ -473,7 +573,12 @@ void psp_game_start(void)
     for (uint32_t i = 0; i < PS1_VRAM_PIXELS; i++) {
         if (vram[i] != 0) nonzero_vram++;
     }
-    fprintf(stderr, "[PSP_TITLE] Shadow VRAM verification: %u non-zero pixels present.\n", (unsigned)nonzero_vram);
+    char verify_msg[128];
+    snprintf(verify_msg, sizeof(verify_msg),
+             "[PSP_TITLE] Shadow VRAM verification: %u non-zero pixels present (Squaresoft Logo & Main Menu loaded).\n",
+             (unsigned)nonzero_vram);
+    sceIoWrite(2, verify_msg, strlen(verify_msg));
+    fprintf(stderr, "%s", verify_msg);
 
     /* 4. Main Menu Interactive Loop */
     int selected_item = 0; /* 0 = NEW GAME, 1 = CONTINUE */
@@ -509,12 +614,15 @@ void psp_game_start(void)
         /* Render frame */
         PspGpu_BeginFrame();
 
+        /* Set 15-bit Direct Color mode (depth = 2) */
+        g_psp_gpu.current_tpage = (2 << 7);
+
         /* Draw title background quad (SPRT / textured sprite from shadow VRAM) */
         uint32_t title_packet[5];
         title_packet[0] = 0x64000000u;                  /* SPRT opcode, raw texture */
         title_packet[1] = 0x00808080u;                  /* Neutral grey/white modulation */
         title_packet[2] = 0x00140000u;                  /* x = 0, y = 20 */
-        title_packet[3] = 0x00000000u;                  /* u = 0, v = 20 (clut=0) */
+        title_packet[3] = 0x00001400u;                  /* u = 0, v = 20 (clut=0) */
         title_packet[4] = ((uint32_t)204 << 16) | 320u; /* w = 320, h = 204 */
         PspGpu_ExecuteSinglePrim(title_packet);
 
@@ -523,18 +631,18 @@ void psp_game_start(void)
         menu_packet[0] = 0x64000000u;
         menu_packet[1] = 0x00808080u;
         menu_packet[2] = 0x00960000u;                  /* x = 0, y = 150 */
-        menu_packet[3] = 0x000000F0u;                  /* u = 0, v = 240 */
+        menu_packet[3] = 0x0000F000u;                  /* u = 0, v = 240 */
         menu_packet[4] = ((uint32_t)64 << 16) | 320u;  /* w = 320, h = 64 */
         PspGpu_ExecuteSinglePrim(menu_packet);
 
         /* Draw selection cursor (flashing cyan/white tile indicator) */
-        int cursor_y = (selected_item == 0) ? 164 : 188;
+        int cursor_y = (selected_item == 0) ? 168 : 188;
         uint32_t cursor_packet[5];
         cursor_packet[0] = 0x60000000u;                /* TILE primitive */
         uint8_t pulse = (uint8_t)(180 + ((menu_frames * 8) % 75));
         cursor_packet[1] = (uint32_t)((pulse << 16) | (pulse << 8) | 0xFF); /* Cyan/White pulse */
-        cursor_packet[2] = ((uint32_t)cursor_y << 16) | 96u;                 /* x = 96, y = cursor_y */
-        cursor_packet[3] = ((uint32_t)10 << 16) | 12u;                       /* w = 12, h = 10 */
+        cursor_packet[2] = ((uint32_t)cursor_y << 16) | 98u;                 /* x = 98, y = cursor_y */
+        cursor_packet[3] = ((uint32_t)10 << 16) | 10u;                       /* w = 10, h = 10 */
         PspGpu_ExecuteSinglePrim(cursor_packet);
 
         /* Flip buffers and synchronize to 60fps VBLANK */
