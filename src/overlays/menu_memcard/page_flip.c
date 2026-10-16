@@ -44,9 +44,16 @@ void MenuCard_FlipScreenPages(void) {
             LoadImage(&clipped, g_MemcardCurrentScreen->overlayImage);
         }
 
+#if defined(__psp__) || defined(ENABLE_PSP)
+        PutDrawEnv(&g_MemcardCurrentScreen->draw);
+        PutDispEnv(&g_MemcardCurrentScreen->disp);
+        VSync(0);
+        ResetGraph(1);
+#else
         VSync(0);
         ResetGraph(1);
         PutDrawEnv(&g_MemcardCurrentScreen->draw);
         PutDispEnv(&g_MemcardCurrentScreen->disp);
+#endif
     }
 }

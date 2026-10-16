@@ -12,6 +12,7 @@
 #define STATE_FLAG_IMAGE_BUSY 0x00100000U
 #define STATE_FLAG_READY 0x00000100U
 #if defined(__psp__) || defined(ENABLE_PSP)
+#include <stdio.h>
 Pe1GameState g_GameState;
 unsigned int g_GameStateFlags;
 u32 g_GameStateFlagsWord;
@@ -20,6 +21,7 @@ int g_SceneDispatchCur;
 u32 g_PlayTimeFrameCounter;
 
 void psx_main(void) {
+    fprintf(stderr, "[PE-PSP] Entered psx_main() -> calling Boot_InitSystem()\n");
 #else
 void main(void) {
 #endif
@@ -28,6 +30,9 @@ void main(void) {
     Pe1GameState *state;
 
     Boot_InitSystem();
+#if defined(__psp__) || defined(ENABLE_PSP)
+    fprintf(stderr, "[PE-PSP] Boot_InitSystem() complete\n");
+#endif
     mode = 0;
 
     for (;;) {
@@ -37,10 +42,16 @@ void main(void) {
         while (Asset_OpenPeImage() != 0) {
             VSync(0);
         }
+#if defined(__psp__) || defined(ENABLE_PSP)
+        fprintf(stderr, "[PE-PSP] Asset_OpenPeImage() succeeded (PE.IMG mounted)\n");
+#endif
 
         Boot_InitGameState();
         Boot_InitSubsystems();
         Scene_LoadSceneData();
+#if defined(__psp__) || defined(ENABLE_PSP)
+        fprintf(stderr, "[PE-PSP] Subsystems & SceneData loaded -> dispatching token 0xA9400048\n");
+#endif
 
         g_SceneDispatchToken = 0xA9400048;
 
@@ -73,6 +84,9 @@ void main(void) {
                 break;
             case 0xA9400048:
                 CdRom_LoadInitialImage();
+#if defined(__psp__) || defined(ENABLE_PSP)
+                fprintf(stderr, "[PE-PSP] CdRom_LoadInitialImage() complete -> entering MenuCard_RunListScreen()\n");
+#endif
                 Draw_InitDisplay(func_801909B4());
                 g_GameState.flags |= 3;
                 break;

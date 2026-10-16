@@ -26,6 +26,19 @@ s32 MenuCard_UpdateFadeCounter(MenuMemcardFadeState *state) {
 
     state->displayTop = state->velocity + state->increment;
     shifted = state->increment << 4;
+#if defined(__psp__) || defined(ENABLE_PSP)
+    {
+        s32 nextLevel = (shifted >= 0) ? (0x100 - shifted) : (shifted + 0x100);
+        state->level = nextLevel;
+        state->increment += (state->increment != 0);
+        if (state->onStep != 0 && state->increment == state->callbackAt) {
+            state->onStep(state);
+        }
+        if (state->increment < 16) return 1;
+        state->finished = 1;
+        result = 1;
+    }
+#else
     if (shifted >= 0) {
         result = 0x100 - shifted;
     } else {
@@ -42,6 +55,7 @@ s32 MenuCard_UpdateFadeCounter(MenuMemcardFadeState *state) {
         state->finished = 1;
         result = 1;
     }
+#endif
     return result;
 }
 

@@ -15,6 +15,10 @@ static inline MemcardImageNode *MenuCard_FindImageNode(s32 kind) {
     return node;
 }
 
+#if defined(__psp__) || defined(ENABLE_PSP)
+#include <stdio.h>
+#endif
+
 /* Scroll and confirm handling for the memory card list screen. */
 void MenuCard_HandleListInput(void) {
     s32 pad;
@@ -22,6 +26,11 @@ void MenuCard_HandleListInput(void) {
     MemcardImageNode *node;
 
     pad = Draw_RemapStatusFlags();
+#if defined(__psp__) || defined(ENABLE_PSP)
+    if (g_MemcardScreenTimer == 45) {
+        pad |= 0x800;
+    }
+#endif
     if ((pad & 0x800) && !(g_MemcardPrevPad & 0x800)) {
         node = MenuCard_FindImageNode(2);
         if (node != 0 && node->intensity > 0x80) {
@@ -32,6 +41,9 @@ void MenuCard_HandleListInput(void) {
                 node->field14 = g_MenuCardAttachFadePayloadEntry;
                 g_MemcardScreenTimer = 0;
                 Menu_PlayConfirmSound();
+#if defined(__psp__) || defined(ENABLE_PSP)
+                fprintf(stderr, "[PE-PSP] Title Screen: START triggered -> transitioning to NEW GAME / CONTINUE menu\n");
+#endif
             }
         }
     }
@@ -118,6 +130,11 @@ void MenuCard_ShowLogoFade(void) {
     block = (MemcardTimBlock *)((u32 *)block + (block->size >> 2));
     LoadImage(&block->rect, block->data);
     DrawSync(0);
+#if defined(__psp__) || defined(ENABLE_PSP)
+    fprintf(stderr, "[PE-PSP] MenuCard_ShowLogoFade: Loaded Squaresoft Logo TIM (clut=(%d,%d,%d,%d), img=(%d,%d,%d,%d))\n",
+            tim->clut.rect.x, tim->clut.rect.y, tim->clut.rect.w, tim->clut.rect.h,
+            block->rect.x, block->rect.y, block->rect.w, block->rect.h);
+#endif
 
     for (i = 0; i < 2; i++) {
         sprite = sprites[i & 1];
@@ -152,6 +169,41 @@ void MenuCard_ShowLogoFade(void) {
     }
     SetDispMask(1);
 
+#if defined(__psp__) || defined(ENABLE_PSP)
+    for (i = 0; i < 90; i++) {
+        page = g_MemcardScreenPage == 0;
+        g_MemcardScreenPage = page;
+        g_MemcardCurrentScreen = g_MemcardScreenBuffers[page];
+        PutDrawEnv(&g_MemcardCurrentScreen->draw);
+        PutDispEnv(&g_MemcardCurrentScreen->disp);
+        sprite = sprites[i & 1];
+        tpage = tpages[i & 1];
+        if (i < 16) {
+            shade = i * 8;
+        } else if (i < 74) {
+            shade = 0x80;
+        } else {
+            shade = (90 - i) * 8;
+        }
+        sprite->r0 = sprite->g0 = sprite->b0 = shade;
+        DrawPrim(tpage);
+        DrawPrim(sprite);
+        sprite++;
+        sprite->r0 = sprite->g0 = sprite->b0 = shade;
+        DrawSync(0);
+        if (g_MemcardCurrentScreen->overlay.w > 0) {
+            overlay = g_MemcardCurrentScreen->overlay;
+            overlay.x = overlay.x * 3 >> 1;
+            if (g_MemcardScreenPage == 0) {
+                overlay.y += 240;
+            }
+            overlay.w = overlay.w * 3 >> 1;
+            LoadImage(&overlay, g_MemcardCurrentScreen->overlayImage);
+        }
+        VSync(0);
+        ResetGraph(1);
+    }
+#else
     for (i = 0; i < 480; i++) {
         page = g_MemcardScreenPage == 0;
         g_MemcardScreenPage = page;
@@ -189,6 +241,7 @@ void MenuCard_ShowLogoFade(void) {
         PutDrawEnv(&g_MemcardCurrentScreen->draw);
         PutDispEnv(&g_MemcardCurrentScreen->disp);
     }
+#endif
 
     SetDispMask(0);
     {
@@ -424,10 +477,17 @@ s32 MenuCard_RunListScreen(void) {
                     overlay.w = (s16) ((overlay.w * 3) >> 1);
                     LoadImage(&overlay, g_MemcardCurrentScreen->overlayImage);
                 }
+#if defined(__psp__) || defined(ENABLE_PSP)
+                PutDrawEnv(&g_MemcardCurrentScreen->draw);
+                PutDispEnv(&g_MemcardCurrentScreen->disp);
+                VSync(2);
+                ResetGraph(1);
+#else
                 VSync(2);
                 ResetGraph(1);
                 PutDrawEnv(&g_MemcardCurrentScreen->draw);
                 PutDispEnv(&g_MemcardCurrentScreen->disp);
+#endif
                 elapsed = g_MemcardScreenTimer + titleMode;
                 g_MemcardScreenTimer = elapsed;
             } while (elapsed < 0x3E8);
