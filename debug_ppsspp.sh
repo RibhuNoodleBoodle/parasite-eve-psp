@@ -109,15 +109,15 @@ rm -f "$LOG_FILE" "$PPSSPP_DIR/ probe"*.log 2>/dev/null || true
 touch "$ROOT_DIR/dist/PSP/GAME/ParasiteEve/frame_dump_enable.flag" 2>/dev/null || true
 touch "$MEMSTICK_GAME_DIR/frame_dump_enable.flag" 2>/dev/null || true
 
-if [[ "${PE_AUTOTEST:-1}" == "1" ]]; then
+if [[ "${PE_AUTOTEST:-0}" == "1" ]]; then
     touch "$ROOT_DIR/dist/PSP/GAME/ParasiteEve/autotest.flag" 2>/dev/null || true
     touch "$MEMSTICK_GAME_DIR/autotest.flag" 2>/dev/null || true
 fi
 
 if [[ -x "$APPIMAGE_BIN" ]]; then
-    HOME="$(pwd)/.ppsspp" PE_AUTOTEST="${PE_AUTOTEST:-1}" timeout "${RUN_TIMEOUT}" ./.ppsspp/*.AppImage --appimage-extract-and-run -v --log="$(pwd)/.ppsspp/ppsspp_debug.log" "$(pwd)/dist/PSP/GAME/ParasiteEve/EBOOT.PBP" || true
+    HOME="$(pwd)/.ppsspp" PE_AUTOTEST="${PE_AUTOTEST:-0}" timeout "${RUN_TIMEOUT}" ./.ppsspp/*.AppImage --appimage-extract-and-run -v --log="$(pwd)/.ppsspp/ppsspp_debug.log" "$(pwd)/dist/PSP/GAME/ParasiteEve/EBOOT.PBP" || true
 else
-    HOME="$(pwd)/.ppsspp" PE_AUTOTEST="${PE_AUTOTEST:-1}" timeout "${RUN_TIMEOUT}" /lib64/ld-linux-x86-64.so.2 ./.ppsspp/*.AppImage --appimage-extract-and-run -v --log="$(pwd)/.ppsspp/ppsspp_debug.log" "$(pwd)/dist/PSP/GAME/ParasiteEve/EBOOT.PBP" || true
+    HOME="$(pwd)/.ppsspp" PE_AUTOTEST="${PE_AUTOTEST:-0}" timeout "${RUN_TIMEOUT}" /lib64/ld-linux-x86-64.so.2 ./.ppsspp/*.AppImage --appimage-extract-and-run -v --log="$(pwd)/.ppsspp/ppsspp_debug.log" "$(pwd)/dist/PSP/GAME/ParasiteEve/EBOOT.PBP" || true
 fi
 
 rm -f "$ROOT_DIR/dist/PSP/GAME/ParasiteEve/frame_dump_enable.flag" "$MEMSTICK_GAME_DIR/frame_dump_enable.flag" 2>/dev/null || true

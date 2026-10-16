@@ -171,7 +171,9 @@ void PspInput_Poll(void)
     if (btn_start)    buttons |= HOST_PAD_START;
 
     /*
-     * Automated Input Injection: Active during headless tests until Step 4.
+     * Automated Input Injection: Gated strictly by explicit environment
+     * variable (PE_AUTOTEST=1) or autotest flag file. In normal execution,
+     * zero synthetic input is injected so the player retains manual control.
      */
     static int s_autotest = -1;
     static uint32_t s_poll_counter = 0;
@@ -179,13 +181,26 @@ void PspInput_Poll(void)
 
     if (s_autotest < 0) {
         const char *env = getenv("PE_AUTOTEST");
-        if (env && (strcmp(env, "0") == 0 || strcmp(env, "false") == 0)) {
-            s_autotest = 0;
-        } else {
+        if (env && strcmp(env, "1") == 0) {
             s_autotest = 1;
-        }
-        if (s_autotest == 1) {
-            fprintf(stderr, "[PE-AUTOTEST] PE_AUTOTEST active: automated test injection enabled.\n");
+            fprintf(stderr, "[PE-AUTOTEST] PE_AUTOTEST=1: automated diagnostic input injection enabled.\n");
+        } else {
+            SceUID fd = -1;
+#if defined(__psp__) || defined(ENABLE_PSP)
+            fd = sceIoOpen("autotest.flag", PSP_O_RDONLY, 0777);
+            if (fd < 0) {
+                fd = sceIoOpen("ms0:/PSP/GAME/ParasiteEve/autotest.flag", PSP_O_RDONLY, 0777);
+            }
+#endif
+            if (fd >= 0) {
+                s_autotest = 1;
+#if defined(__psp__) || defined(ENABLE_PSP)
+                sceIoClose(fd);
+#endif
+                fprintf(stderr, "[PE-AUTOTEST] autotest.flag present: automated diagnostic input injection enabled.\n");
+            } else {
+                s_autotest = 0;
+            }
         }
     }
 
