@@ -21,6 +21,12 @@
 #include <sys/stat.h>
 #include <errno.h>
 
+#if defined(__psp__) || defined(ENABLE_PSP)
+PSP_MODULE_INFO("ParasiteEve", 0, 1, 0);
+PSP_MAIN_THREAD_ATTR(THREAD_ATTR_USER | THREAD_ATTR_VFPU);
+PSP_HEAP_SIZE_KB(-1024);
+#endif
+
 /* Forward declaration for pe_memcard hook if present in build */
 extern void PE_Memcard_SetPath(int port, const char *path) __attribute__((weak));
 
@@ -390,3 +396,27 @@ void PspHost_Delay(uint32_t ms)
 {
     SDL_Delay(ms);
 }
+
+#if defined(__psp__) || defined(ENABLE_PSP)
+int __attribute__((weak)) main(int argc, char *argv[])
+{
+    (void)argc;
+    (void)argv;
+
+    if (!PspHost_Init()) {
+        return 1;
+    }
+
+    extern void psp_game_start(void) __attribute__((weak));
+    if (psp_game_start) {
+        psp_game_start();
+    } else {
+        while (PspHost_IsRunning()) {
+            PspHost_Delay(16);
+        }
+    }
+
+    PspHost_Shutdown();
+    return 0;
+}
+#endif

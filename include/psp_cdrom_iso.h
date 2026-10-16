@@ -27,9 +27,28 @@ extern "C" {
 #define PSP_CDROM_RING_BYTES     (PSP_CDROM_RING_SECTORS * PSP_CDROM_SECTOR_RAW)
 
 /* Memory Stick Paths */
+#ifndef PSP_DISC_DIR
 #define PSP_DISC_DIR             "ms0:/PSP/GAME/ParasiteEve/disc"
-#define PSP_DISC1_DEFAULT_PATH   "ms0:/PSP/GAME/ParasiteEve/disc/Parasite Eve (USA) (Disc 1).bin"
-#define PSP_DISC2_DEFAULT_PATH   "ms0:/PSP/GAME/ParasiteEve/disc/Parasite Eve (USA) (Disc 2).bin"
+#endif
+
+#ifndef PSP_DISC1_PATH
+#define PSP_DISC1_PATH           "ms0:/PSP/GAME/ParasiteEve/disc/PE_DISC1.BIN"
+#endif
+
+#ifndef PSP_DISC1_FALLBACK
+#define PSP_DISC1_FALLBACK       "./disc/PE_DISC1.BIN"
+#endif
+
+#ifndef PSP_DISC2_PATH
+#define PSP_DISC2_PATH           "ms0:/PSP/GAME/ParasiteEve/disc/PE_DISC2.BIN"
+#endif
+
+#ifndef PSP_DISC2_FALLBACK
+#define PSP_DISC2_FALLBACK       "./disc/PE_DISC2.BIN"
+#endif
+
+#define PSP_DISC1_DEFAULT_PATH   PSP_DISC1_PATH
+#define PSP_DISC2_DEFAULT_PATH   PSP_DISC2_PATH
 
 /* CD-ROM Status Flags */
 #define PSP_CD_STAT_PLAYING      0x80u

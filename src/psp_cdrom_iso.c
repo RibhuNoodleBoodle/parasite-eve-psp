@@ -212,9 +212,12 @@ int PspCdrom_Init(const char *disc1_path, const char *disc2_path)
     /* Attempt to open Disc 1 first */
     s_cd.active_disc = 1;
     if (!open_disc_file(s_cd.disc1_path)) {
-        /* Fallback: try local file */
-        if (!open_disc_file("Parasite Eve (USA) (Disc 1).bin")) {
-            fprintf(stderr, "[PSP_CDROM] Warning: Could not open Disc 1: %s\n", s_cd.disc1_path);
+        /* Fallback: try configured fallback path, then local files */
+        if (!open_disc_file(PSP_DISC1_FALLBACK) &&
+            !open_disc_file("Parasite Eve (USA) (Disc 1).bin") &&
+            !open_disc_file("./disc/Parasite Eve (USA) (Disc 1).bin")) {
+            fprintf(stderr, "[PSP_CDROM] Warning: Could not open Disc 1: %s (fallback: %s)\n",
+                    s_cd.disc1_path, PSP_DISC1_FALLBACK);
         }
     }
 
@@ -288,11 +291,14 @@ int PspCdrom_SwapDisc(int disc_number)
     s_cd.ring_count = 0;
 
     if (!open_disc_file(target_path)) {
-        /* Local fallback */
-        const char *fallback = (disc_number == 1) ? "Parasite Eve (USA) (Disc 1).bin"
-                                                  : "Parasite Eve (USA) (Disc 2).bin";
-        if (!open_disc_file(fallback)) {
-            fprintf(stderr, "[PSP_CDROM] Error: Disc swap failed to open: %s\n", target_path);
+        /* Configured fallback or local fallback */
+        const char *fallback = (disc_number == 1) ? PSP_DISC1_FALLBACK : PSP_DISC2_FALLBACK;
+        const char *alt_fallback = (disc_number == 1) ? "Parasite Eve (USA) (Disc 1).bin"
+                                                      : "Parasite Eve (USA) (Disc 2).bin";
+        if (!open_disc_file(fallback) &&
+            !open_disc_file(alt_fallback)) {
+            fprintf(stderr, "[PSP_CDROM] Error: Disc swap failed to open: %s (fallback: %s)\n",
+                    target_path, fallback);
             SDL_UnlockMutex(s_cd.lock);
             return 0;
         }
