@@ -196,9 +196,28 @@ tools/binutils-2.45/
 # Hermetic PSP Toolchain, SDK, archives, and compiled binary targets
 .pspsdk/
 pspdev*.tar.gz
+build_psp/
+build_test/
+dist/
+*.o
+*.a
+*.elf
 *.prx
 *.pbp
+*.PBP
 *.sfo
+*.SFO
 EBOOT.PBP
 PARAM.SFO
 SAVEDATA/
+
+# Disc images (BIN/CUE, ISO)
+*.BIN
+*.bin
+*.iso
+*.ISO
+*.cue
+*.CUE
+*.img
+*.IMG
+!disc/disc1.xml
