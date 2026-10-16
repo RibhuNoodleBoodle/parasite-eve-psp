@@ -9,10 +9,13 @@
 #include "psp_sdl_host.h"
 #include "psp_sdl_input.h"
 #include "psp_sdl_audio.h"
+#include "psp_gpu_gu.h"
+#include "psp_cdrom_iso.h"
 
 #include <pspkernel.h>
 #include <psppower.h>
 #include <pspiofilemgr.h>
+#include <pspgu.h>
 #include <SDL/SDL.h>
 
 #include <stdio.h>
@@ -397,26 +400,70 @@ void PspHost_Delay(uint32_t ms)
     SDL_Delay(ms);
 }
 
+#ifdef main
+#undef main
+#endif
+
 #if defined(__psp__) || defined(ENABLE_PSP)
-int __attribute__((weak)) main(int argc, char *argv[])
+int main(int argc, char *argv[])
 {
     (void)argc;
     (void)argv;
 
-    if (!PspHost_Init()) {
+    /* 1. Setup PSP kernel exit callback thread early */
+    psp_setup_callbacks();
+
+    /* 2. Verify PE_DISC1.bin and PE_DISC2.bin files first */
+    fprintf(stderr, "[PSP_HOST] Verifying PE_DISC1.bin and PE_DISC2.bin presence...\n");
+    if (!psp_verify_disc_files()) {
+        fprintf(stderr, "[PSP_HOST] Disc verification failed!\n");
         return 1;
     }
 
+    if (!PspCdrom_Init(NULL, NULL)) {
+        fprintf(stderr, "[PSP_HOST] Disc init failed!\n");
+        return 1;
+    }
+
+    /* 3. Initialize host hardware, clocks (333/166MHz), SDL audio/input/timer, and save subsystem */
+    if (!PspHost_Init()) {
+        fprintf(stderr, "[PSP_HOST] Host initialization failed!\n");
+        return 1;
+    }
+
+    /* 4. Initialize native sceGu hardware rasterizer */
+    fprintf(stderr, "[PSP_GPU] Initializing native sceGu hardware backend...\n");
+    PspGpu_Init();
+
+    /* 5. Visible hardware diagnostic test: Clear screen to dark blue (0xFF401000) for 15 frames */
+    fprintf(stderr, "[PSP_GPU] Hardware visual diagnostic: clearing to dark blue (0xFF401000) for 15 frames...\n");
+    for (int frame = 0; frame < 15; frame++) {
+        PspGpu_BeginFrame();
+        sceGuClearColor(0xFF401000);
+        sceGuClearDepth(0);
+        sceGuClear(GU_COLOR_BUFFER_BIT | GU_FAST_CLEAR_BIT);
+        PspGpu_Flip();
+    }
+    fprintf(stderr, "[PSP_GPU] Hardware visual diagnostic complete (15 frames rendered).\n");
+
+    /* 6. Start game execution loop */
     extern void psp_game_start(void) __attribute__((weak));
     if (psp_game_start) {
+        fprintf(stderr, "[PSP_HOST] Invoking psp_game_start()...\n");
         psp_game_start();
     } else {
+        fprintf(stderr, "[PSP_HOST] Entering fallback host poll loop...\n");
         while (PspHost_IsRunning()) {
+            PspInput_Poll();
+            PspGpu_BeginFrame();
+            PspGpu_Flip();
             PspHost_Delay(16);
         }
     }
 
+    PspGpu_Shutdown();
     PspHost_Shutdown();
+    PspCdrom_Shutdown();
     return 0;
 }
 #endif
