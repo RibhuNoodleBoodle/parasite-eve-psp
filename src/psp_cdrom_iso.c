@@ -16,6 +16,9 @@
 
 #include <pspkernel.h>
 #include <pspiofilemgr.h>
+#include <pspdebug.h>
+#include <pspctrl.h>
+#include <pspdisplay.h>
 #include <SDL/SDL.h>
 #include <SDL/SDL_thread.h>
 #include <SDL/SDL_mutex.h>
@@ -32,7 +35,7 @@ typedef struct PspCdromState {
     int          active_disc;          /* 1 or 2 */
     char         disc1_path[256];
     char         disc2_path[256];
-    FILE        *file_handle;
+    SceUID       fd;                   /* Native PSP kernel file descriptor */
     uint32_t     total_sectors;
     uint32_t     current_lba;
     uint32_t     target_lba;
@@ -104,6 +107,9 @@ static int cdrom_worker_thread(void *arg)
 {
     (void)arg;
 
+    /* Lower thread priority so background reader never starves main thread */
+    sceKernelChangeThreadPriority(0, 0x38);
+
     while (s_cd.worker_running) {
         uint32_t next_lba;
         uint32_t write_slot;
@@ -112,8 +118,9 @@ static int cdrom_worker_thread(void *arg)
 
         SDL_LockMutex(s_cd.lock);
 
-        /* Wait while ring buffer is completely full or paused */
-        while (s_cd.worker_running && !s_cd.seeking && s_cd.ring_count >= PSP_CDROM_RING_SECTORS) {
+        /* Wait while ring buffer is completely full, paused, or idle */
+        while (s_cd.worker_running && !s_cd.seeking &&
+               ((s_cd.ring_count >= PSP_CDROM_RING_SECTORS) || !(s_cd.status & PSP_CD_STAT_READING))) {
             SDL_CondWait(s_cd.cond_space_avail, s_cd.lock);
         }
 
@@ -129,13 +136,13 @@ static int cdrom_worker_thread(void *arg)
             s_cd.ring_write_idx = 0;
             s_cd.ring_count = 0;
             s_cd.seeking = 0;
-            if (s_cd.file_handle) {
-                fseek(s_cd.file_handle, (long)((uint64_t)s_cd.current_lba * PSP_CDROM_SECTOR_RAW), SEEK_SET);
+            if (s_cd.fd >= 0) {
+                sceIoLseek(s_cd.fd, (SceOff)s_cd.current_lba * PSP_CDROM_SECTOR_RAW, PSP_SEEK_SET);
             }
         }
 
         next_lba = s_cd.current_lba;
-        if (!s_cd.file_handle || next_lba >= s_cd.total_sectors) {
+        if (s_cd.fd < 0 || next_lba >= s_cd.total_sectors) {
             s_cd.status &= (uint8_t)~PSP_CD_STAT_READING;
             s_cd.status |= PSP_CD_STAT_IDLE;
             SDL_CondWait(s_cd.cond_space_avail, s_cd.lock);
@@ -147,7 +154,7 @@ static int cdrom_worker_thread(void *arg)
         SDL_UnlockMutex(s_cd.lock);
 
         /* Perform physical file read outside of lock to prevent stalling main thread */
-        read_bytes = fread(temp_sector, 1, PSP_CDROM_SECTOR_RAW, s_cd.file_handle);
+        read_bytes = (size_t)sceIoRead(s_cd.fd, temp_sector, PSP_CDROM_SECTOR_RAW);
 
         SDL_LockMutex(s_cd.lock);
         if (read_bytes == PSP_CDROM_SECTOR_RAW && !s_cd.seeking) {
@@ -156,10 +163,12 @@ static int cdrom_worker_thread(void *arg)
             s_cd.ring_write_idx = (s_cd.ring_write_idx + 1u) % PSP_CDROM_RING_SECTORS;
             s_cd.ring_count++;
             s_cd.current_lba++;
-            s_cd.status |= PSP_CD_STAT_READING;
             SDL_CondSignal(s_cd.cond_data_avail);
         }
         SDL_UnlockMutex(s_cd.lock);
+
+        /* Yield briefly to give time to main user thread */
+        sceKernelDelayThread(200);
     }
 
     return 0;
@@ -167,27 +176,236 @@ static int cdrom_worker_thread(void *arg)
 
 /* ── CD-ROM Subsystem Lifecycle ─────────────────────────────────────────────── */
 
-static int open_disc_file(const char *path)
+/* Search candidate paths for Disc 1 and Disc 2 (hardcoded filenames and exact fallback array) */
+static const char * const s_disc1_search_paths[] = {
+    "disc/PE_DISC1.bin",
+    "ms0:/PSP/GAME/ParasiteEve/disc/PE_DISC1.bin",
+    "./PE_DISC1.bin",
+    "./disc/PE_DISC1.bin",
+    "host0:/dist/PSP/GAME/ParasiteEve/disc/PE_DISC1.bin",
+    NULL
+};
+
+static const char * const s_disc2_search_paths[] = {
+    "disc/PE_DISC2.bin",
+    "ms0:/PSP/GAME/ParasiteEve/disc/PE_DISC2.bin",
+    "./PE_DISC2.bin",
+    "./disc/PE_DISC2.bin",
+    "host0:/dist/PSP/GAME/ParasiteEve/disc/PE_DISC2.bin",
+    NULL
+};
+
+static void fatal_disc_not_found(int disc_num, const char * const candidates[], int last_error)
 {
-    if (s_cd.file_handle) {
-        fclose(s_cd.file_handle);
-        s_cd.file_handle = NULL;
+    const char *disc_name = (disc_num == 2) ? "PE_DISC2.bin" : "PE_DISC1.bin";
+    char log_buf[512];
+    int len;
+
+    /* a) Write [FATAL ERROR] FILE NOT FOUND to stderr via sceIoWrite(2, ...) */
+    len = snprintf(log_buf, sizeof(log_buf),
+                   "\n[FATAL ERROR] FILE NOT FOUND: %s (last sceIoOpen error: 0x%08X)\nAttempted paths:\n",
+                   disc_name, (unsigned int)last_error);
+    sceIoWrite(2, log_buf, len);
+
+    for (int i = 0; candidates[i] != NULL; i++) {
+        len = snprintf(log_buf, sizeof(log_buf), "  [%d] %s\n", i + 1, candidates[i]);
+        sceIoWrite(2, log_buf, len);
     }
 
-    s_cd.file_handle = fopen(path, "rb");
-    if (!s_cd.file_handle) {
+    /* b) Initialize PSP hardware debug screen with red background */
+    pspDebugScreenInit();
+    pspDebugScreenSetBackColor(0xFF000080); /* Dark red background */
+    pspDebugScreenSetTextColor(0xFF0000FF); /* Bright red text (ABGR) */
+    pspDebugScreenClear();
+
+    pspDebugScreenPrintf("\n");
+    pspDebugScreenPrintf("  ==================================================\n");
+    pspDebugScreenPrintf("         PARASITE EVE PSP PORT - FATAL ERROR       \n");
+    pspDebugScreenPrintf("  ==================================================\n\n");
+    pspDebugScreenPrintf("  ERROR: File not found: %s\n\n", disc_name);
+    pspDebugScreenPrintf("  Place PE_DISC1.bin and PE_DISC2.bin in:\n");
+    pspDebugScreenPrintf("    ms0:/PSP/GAME/ParasiteEve/disc/\n\n");
+    pspDebugScreenPrintf("  Attempted paths (last sceIoOpen err: 0x%08X):\n", (unsigned int)last_error);
+    for (int i = 0; candidates[i] != NULL; i++) {
+        pspDebugScreenPrintf("   - %s\n", candidates[i]);
+    }
+    pspDebugScreenPrintf("\n  Press START to exit to PSP Home Menu.\n");
+
+    /* c) Loop cleanly with sceDisplayWaitVblankStart() and allow exit via START or HOME */
+    sceCtrlSetSamplingCycle(0);
+    sceCtrlSetSamplingMode(PSP_CTRL_MODE_ANALOG);
+
+    while (1) {
+        SceCtrlData pad;
+        sceCtrlReadBufferPositive(&pad, 1);
+        if (pad.Buttons & (PSP_CTRL_START | PSP_CTRL_HOME)) {
+            break;
+        }
+        sceDisplayWaitVblankStart();
+    }
+
+    sceKernelExitGame();
+}
+
+int psp_verify_disc_files(void)
+{
+    int disc1_found = 0;
+    int disc2_found = 0;
+    int last_err1 = -1;
+    int last_err2 = -1;
+
+    for (int i = 0; s_disc1_search_paths[i] != NULL; i++) {
+        SceUID fd = sceIoOpen(s_disc1_search_paths[i], PSP_O_RDONLY, 0);
+        if (fd >= 0) {
+            sceIoClose(fd);
+            disc1_found = 1;
+            break;
+        } else {
+            last_err1 = (int)fd;
+        }
+    }
+
+    for (int i = 0; s_disc2_search_paths[i] != NULL; i++) {
+        SceUID fd = sceIoOpen(s_disc2_search_paths[i], PSP_O_RDONLY, 0);
+        if (fd >= 0) {
+            sceIoClose(fd);
+            disc2_found = 1;
+            break;
+        } else {
+            last_err2 = (int)fd;
+        }
+    }
+
+    if (!disc1_found || !disc2_found) {
+        char err_msg[512];
+        int len;
+
+        /* Write to stderr via sceIoWrite(2, ...) */
+        len = snprintf(err_msg, sizeof(err_msg),
+            "\n[FATAL ERROR] File not found -> PE_DISC1.bin or PE_DISC2.bin\n"
+            "Disc 1 found: %s (last err: 0x%08X)\n"
+            "Disc 2 found: %s (last err: 0x%08X)\n"
+            "Attempted search locations:\n"
+            "  1. disc/PE_DISC1.bin | disc/PE_DISC2.bin\n"
+            "  2. ms0:/PSP/GAME/ParasiteEve/disc/PE_DISC1.bin | ms0:/PSP/GAME/ParasiteEve/disc/PE_DISC2.bin\n"
+            "  3. ./PE_DISC1.bin | ./PE_DISC2.bin\n",
+            disc1_found ? "YES" : "NO", (unsigned int)last_err1,
+            disc2_found ? "YES" : "NO", (unsigned int)last_err2);
+        sceIoWrite(2, err_msg, len);
+
+        /* Initialize PSP debug screen with bright red text */
+        pspDebugScreenInit();
+        pspDebugScreenSetBackColor(0xFF000080);
+        pspDebugScreenSetTextColor(0xFF0000FF);
+        pspDebugScreenClear();
+
+        pspDebugScreenPrintf("\n");
+        pspDebugScreenPrintf("  ======================================================\n");
+        pspDebugScreenPrintf("          PARASITE EVE PSP PORT - FATAL ERROR           \n");
+        pspDebugScreenPrintf("  ======================================================\n\n");
+        pspDebugScreenPrintf("  FATAL ERROR: File not found -> PE_DISC1.bin or PE_DISC2.bin\n\n");
+        pspDebugScreenPrintf("  Status:\n");
+        pspDebugScreenPrintf("    - PE_DISC1.bin: %s\n", disc1_found ? "FOUND" : "MISSING");
+        pspDebugScreenPrintf("    - PE_DISC2.bin: %s\n\n", disc2_found ? "FOUND" : "MISSING");
+        pspDebugScreenPrintf("  Please place PE_DISC1.bin and PE_DISC2.bin into:\n");
+        pspDebugScreenPrintf("    ms0:/PSP/GAME/ParasiteEve/disc/\n\n");
+        pspDebugScreenPrintf("  Attempted search paths:\n");
+        for (int i = 0; s_disc1_search_paths[i] != NULL; i++) {
+            pspDebugScreenPrintf("    - %s\n", s_disc1_search_paths[i]);
+        }
+        pspDebugScreenPrintf("\n  Press START to exit to PSP Home Menu.\n");
+
+        sceCtrlSetSamplingCycle(0);
+        sceCtrlSetSamplingMode(PSP_CTRL_MODE_ANALOG);
+
+        while (1) {
+            SceCtrlData pad;
+            sceCtrlReadBufferPositive(&pad, 1);
+            if (pad.Buttons & (PSP_CTRL_START | PSP_CTRL_HOME)) {
+                break;
+            }
+            sceDisplayWaitVblankStart();
+        }
+
+        sceKernelExitGame();
         return 0;
     }
 
-    fseek(s_cd.file_handle, 0, SEEK_END);
-    long size = ftell(s_cd.file_handle);
-    fseek(s_cd.file_handle, 0, SEEK_SET);
+    return 1;
+}
 
-    s_cd.total_sectors = (uint32_t)(size / PSP_CDROM_SECTOR_RAW);
-    s_cd.current_lba = 0;
-    s_cd.target_lba = 0;
-    s_cd.seeking = 1;
+int PspCdrom_CheckDiscExists(int disc_num)
+{
+    const char * const *candidates = (disc_num == 2) ? s_disc2_search_paths : s_disc1_search_paths;
+    for (int i = 0; candidates[i] != NULL; i++) {
+        SceUID test_fd = sceIoOpen(candidates[i], PSP_O_RDONLY, 0777);
+        if (test_fd >= 0) {
+            sceIoClose(test_fd);
+            return 1;
+        }
+    }
+    return 0;
+}
 
+static int open_disc_file(int disc_num, const char *preferred_path)
+{
+    const char * const *candidates = (disc_num == 2) ? s_disc2_search_paths : s_disc1_search_paths;
+    const char *disc_name = (disc_num == 2) ? "PE_DISC2.bin" : "PE_DISC1.bin";
+    int last_error = -1;
+
+    if (s_cd.fd >= 0) {
+        sceIoClose(s_cd.fd);
+        s_cd.fd = -1;
+    }
+
+    /* 1. Try preferred path */
+    if (preferred_path && preferred_path[0]) {
+        s_cd.fd = sceIoOpen(preferred_path, PSP_O_RDONLY, 0777);
+        if (s_cd.fd >= 0) {
+            snprintf(disc_num == 2 ? s_cd.disc2_path : s_cd.disc1_path, 256, "%s", preferred_path);
+            goto found;
+        } else {
+            last_error = s_cd.fd;
+        }
+    }
+
+    /* 2. Try candidate fallback search array */
+    for (int i = 0; candidates[i] != NULL; i++) {
+        s_cd.fd = sceIoOpen(candidates[i], PSP_O_RDONLY, 0777);
+        if (s_cd.fd >= 0) {
+            snprintf(disc_num == 2 ? s_cd.disc2_path : s_cd.disc1_path, 256, "%s", candidates[i]);
+            goto found;
+        } else {
+            last_error = s_cd.fd;
+        }
+    }
+
+    /* 3. None opened: trigger explicit visible error screen & terminal log */
+    fatal_disc_not_found(disc_num, candidates, last_error);
+    return 0;
+
+found:
+    {
+        SceOff size = sceIoLseek(s_cd.fd, 0, PSP_SEEK_END);
+        sceIoLseek(s_cd.fd, 0, PSP_SEEK_SET);
+
+        s_cd.total_sectors = (uint32_t)(size / PSP_CDROM_SECTOR_RAW);
+        s_cd.current_lba = 0;
+        s_cd.target_lba = 0;
+        s_cd.seeking = 0;
+        s_cd.active_disc = disc_num;
+        s_cd.status = 0x02; /* CdlStatStandby */
+
+        char msg[256];
+        int len = snprintf(msg, sizeof(msg),
+                 "[PSP_CDROM] Opened %s from %s (%u sectors, %lu MB, fd=%d)\n",
+                 disc_name,
+                 (disc_num == 2 ? s_cd.disc2_path : s_cd.disc1_path),
+                 (unsigned)s_cd.total_sectors,
+                 (unsigned long)(size / (1024 * 1024)),
+                 (int)s_cd.fd);
+        sceIoWrite(1, msg, len);
+    }
     return 1;
 }
 
@@ -209,17 +427,9 @@ int PspCdrom_Init(const char *disc1_path, const char *disc2_path)
     s_cd.cond_data_avail = SDL_CreateCond();
     s_cd.cond_space_avail = SDL_CreateCond();
 
-    /* Attempt to open Disc 1 first */
+    /* Attempt to open Disc 1 first using candidate search list */
     s_cd.active_disc = 1;
-    if (!open_disc_file(s_cd.disc1_path)) {
-        /* Fallback: try configured fallback path, then local files */
-        if (!open_disc_file(PSP_DISC1_FALLBACK) &&
-            !open_disc_file("Parasite Eve (USA) (Disc 1).bin") &&
-            !open_disc_file("./disc/Parasite Eve (USA) (Disc 1).bin")) {
-            fprintf(stderr, "[PSP_CDROM] Warning: Could not open Disc 1: %s (fallback: %s)\n",
-                    s_cd.disc1_path, PSP_DISC1_FALLBACK);
-        }
-    }
+    open_disc_file(1, s_cd.disc1_path);
 
     s_cd.status = PSP_CD_STAT_IDLE;
     s_cd.worker_running = 1;
@@ -248,9 +458,9 @@ void PspCdrom_Shutdown(void)
     }
 
     if (s_cd.lock) SDL_LockMutex(s_cd.lock);
-    if (s_cd.file_handle) {
-        fclose(s_cd.file_handle);
-        s_cd.file_handle = NULL;
+    if (s_cd.fd >= 0) {
+        sceIoClose(s_cd.fd);
+        s_cd.fd = -1;
     }
     if (s_cd.lock) SDL_UnlockMutex(s_cd.lock);
 
@@ -275,7 +485,7 @@ int PspCdrom_SwapDisc(int disc_number)
     const char *target_path;
 
     if (disc_number != 1 && disc_number != 2) return 0;
-    if (disc_number == s_cd.active_disc && s_cd.file_handle) return 1;
+    if (disc_number == s_cd.active_disc && s_cd.fd >= 0) return 1;
 
     target_path = (disc_number == 1) ? s_cd.disc1_path : s_cd.disc2_path;
 
@@ -290,18 +500,11 @@ int PspCdrom_SwapDisc(int disc_number)
     s_cd.ring_write_idx = 0;
     s_cd.ring_count = 0;
 
-    if (!open_disc_file(target_path)) {
-        /* Configured fallback or local fallback */
-        const char *fallback = (disc_number == 1) ? PSP_DISC1_FALLBACK : PSP_DISC2_FALLBACK;
-        const char *alt_fallback = (disc_number == 1) ? "Parasite Eve (USA) (Disc 1).bin"
-                                                      : "Parasite Eve (USA) (Disc 2).bin";
-        if (!open_disc_file(fallback) &&
-            !open_disc_file(alt_fallback)) {
-            fprintf(stderr, "[PSP_CDROM] Error: Disc swap failed to open: %s (fallback: %s)\n",
-                    target_path, fallback);
-            SDL_UnlockMutex(s_cd.lock);
-            return 0;
-        }
+    if (!open_disc_file(disc_number, target_path)) {
+        fprintf(stderr, "[PSP_CDROM] Error: Disc swap failed to open disc %d: %s\n",
+                disc_number, target_path);
+        SDL_UnlockMutex(s_cd.lock);
+        return 0;
     }
 
     s_cd.active_disc = disc_number;
@@ -381,8 +584,8 @@ int PspCdrom_ReadRawSector(uint32_t lba, uint8_t *out_raw)
     /* 2. Slow path: sector missed in prefetch ring, seek and synchronous read */
     s_cd.target_lba = lba + 1u;
     s_cd.seeking = 1;
-    fseek(s_cd.file_handle, (long)((uint64_t)lba * PSP_CDROM_SECTOR_RAW), SEEK_SET);
-    size_t n = fread(out_raw, 1, PSP_CDROM_SECTOR_RAW, s_cd.file_handle);
+    sceIoLseek(s_cd.fd, (SceOff)lba * PSP_CDROM_SECTOR_RAW, PSP_SEEK_SET);
+    int n = sceIoRead(s_cd.fd, out_raw, PSP_CDROM_SECTOR_RAW);
     SDL_CondSignal(s_cd.cond_space_avail);
     SDL_UnlockMutex(s_cd.lock);
 
@@ -446,7 +649,7 @@ void CdIntToPos(int lba, unsigned char *msf)
 
 int CdControl(unsigned char com, const unsigned char *param, unsigned char *result)
 {
-    if (result) *result = s_cd.status;
+    if (result) *result = (s_cd.status != 0) ? s_cd.status : 0x02; /* 0x02 = CdlStatStandby */
 
     switch (com) {
     case CdlNop:
@@ -454,6 +657,7 @@ int CdControl(unsigned char com, const unsigned char *param, unsigned char *resu
     case CdlSetloc:
         if (param) {
             uint32_t lba = (uint32_t)CdPosToInt(param);
+            s_cd.current_lba = lba;
             PspCdrom_SeekLba(lba);
         }
         return 1;
@@ -466,9 +670,16 @@ int CdControl(unsigned char com, const unsigned char *param, unsigned char *resu
         s_cd.status &= (uint8_t)~PSP_CD_STAT_READING;
         s_cd.status |= PSP_CD_STAT_IDLE;
         return 1;
+    case CdlSetmode:
+        return 1;
     default:
         return 1;
     }
+}
+
+int CdControlF(unsigned char com, const unsigned char *param)
+{
+    return CdControl(com, param, NULL);
 }
 
 int CdControlB(unsigned char com, const unsigned char *param, unsigned char *result)
@@ -476,39 +687,137 @@ int CdControlB(unsigned char com, const unsigned char *param, unsigned char *res
     return CdControl(com, param, result);
 }
 
+typedef void (*CdlCB)(unsigned char, unsigned char *);
+static CdlCB s_cd_sync_cb = NULL;
+static CdlCB s_cd_ready_cb = NULL;
+static CdlCB s_cd_read_cb = NULL;
+
+extern CdlCB g_CdSyncCallback __attribute__((weak));
+extern CdlCB g_CdReadyCallback __attribute__((weak));
+extern CdlCB g_CdReadCallback __attribute__((weak));
+
+CdlCB CdSyncCallback(CdlCB func)
+{
+    CdlCB prev = s_cd_sync_cb;
+    s_cd_sync_cb = func;
+    return prev;
+}
+
+CdlCB CdReadyCallback(CdlCB func)
+{
+    CdlCB prev = s_cd_ready_cb;
+    s_cd_ready_cb = func;
+    return prev;
+}
+
+CdlCB CdReadCallback(CdlCB func)
+{
+    CdlCB prev = s_cd_read_cb;
+    s_cd_read_cb = func;
+    return prev;
+}
+
+static void fire_cd_sync_callback(void)
+{
+    unsigned char res[8];
+    memset(res, 0, sizeof(res));
+    res[0] = s_cd.status; /* CdlStatStandby (0x02) */
+    if (s_cd_sync_cb) {
+        s_cd_sync_cb(0x02 /* CdlComplete */, res);
+    }
+    if (g_CdSyncCallback) {
+        g_CdSyncCallback(0x02 /* CdlComplete */, res);
+    }
+}
+
+static void fire_cd_ready_callback(void)
+{
+    unsigned char res[8];
+    memset(res, 0, sizeof(res));
+    res[0] = s_cd.status; /* CdlStatStandby (0x02) */
+    if (s_cd_ready_cb) {
+        s_cd_ready_cb(0x01 /* CdlDataReady */, res);
+    }
+    if (g_CdReadyCallback) {
+        g_CdReadyCallback(0x01 /* CdlDataReady */, res);
+    }
+}
+
+static void fire_cd_read_callback(void)
+{
+    unsigned char res[8];
+    memset(res, 0, sizeof(res));
+    res[0] = s_cd.status; /* CdlStatStandby (0x02) */
+    if (s_cd_read_cb) {
+        s_cd_read_cb(0x02 /* CdlComplete */, res);
+    }
+    if (g_CdReadCallback) {
+        g_CdReadCallback(0x02 /* CdlComplete */, res);
+    }
+}
+
 int CdRead(int sectors, unsigned long *buf, int mode)
 {
     (void)mode;
     uint8_t *dst = (uint8_t *)buf;
     for (int i = 0; i < sectors; i++) {
-        if (!PspCdrom_ReadUserSector(s_cd.current_lba, dst)) return 0;
+        if (!PspCdrom_ReadUserSector(s_cd.current_lba, dst)) {
+            memset(dst, 0, PSP_CDROM_SECTOR_USER);
+        }
         dst += PSP_CDROM_SECTOR_USER;
+        s_cd.current_lba++;
     }
+    s_cd.status = 0x02; /* CdlStatStandby */
+    fire_cd_sync_callback();
+    fire_cd_read_callback();
     return 1;
+}
+
+int CdSync(int mode, unsigned char *result)
+{
+    (void)mode;
+    s_cd.status = 0x02; /* CdlStatStandby */
+    if (result) {
+        result[0] = s_cd.status;
+    }
+    fire_cd_sync_callback();
+    return 0; /* CdlComplete (0) */
 }
 
 int CdReadSync(int mode, unsigned char *result)
 {
     (void)mode;
-    if (result) *result = s_cd.status;
-    return (s_cd.status & PSP_CD_STAT_READING) ? 1 : 0;
+    s_cd.status = 0x02; /* CdlStatStandby */
+    if (result) {
+        result[0] = s_cd.status;
+    }
+    return 0; /* 0 sectors remaining / completed */
 }
 
 int CdReady(int mode, unsigned char *result)
 {
     (void)mode;
-    if (result) *result = s_cd.status;
+    s_cd.status = 0x02; /* CdlStatStandby */
+    if (result) {
+        result[0] = s_cd.status;
+    }
+    fire_cd_ready_callback();
     return 1; /* Data ready in ring buffer */
 }
 
 int CdSeekL(const unsigned char *msf)
 {
-    return PspCdrom_SeekLba((uint32_t)CdPosToInt(msf));
+    if (!msf) return 0;
+    uint32_t lba = (uint32_t)CdPosToInt(msf);
+    s_cd.current_lba = lba;
+    return PspCdrom_SeekLba(lba);
 }
 
 int CdGetSector(void *madr, int size)
 {
-    return PspCdrom_ReadRawSector(s_cd.current_lba, (uint8_t *)madr) ? size : 0;
+    int ret = PspCdrom_ReadRawSector(s_cd.current_lba, (uint8_t *)madr) ? size : 0;
+    s_cd.current_lba++;
+    return ret;
 }
 
 /* ── PS1 MDEC & STR Movie Streaming (In-Place IDCT) ─────────────────────────── */

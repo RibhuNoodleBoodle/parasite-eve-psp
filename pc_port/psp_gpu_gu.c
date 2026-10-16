@@ -272,9 +272,9 @@ void PspGpu_SetFilterMode(PspFilterMode filter) {
 void PspGpu_SetDispMask(int mask) {
     g_psp_gpu.display_mask = mask;
     if (mask) {
-        sceGuDisplay(GU_FALSE);
-    } else {
         sceGuDisplay(GU_TRUE);
+    } else {
+        sceGuDisplay(GU_FALSE);
     }
 }
 

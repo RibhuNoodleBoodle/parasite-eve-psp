@@ -42,6 +42,9 @@ int  HostAudio_DeviceOpen(void);
 void HostAudio_SetFastForward(int on);
 int  HostAudio_QueueFrames(void);
 
+/* SPU DMA non-blocking completion poll */
+long SpuIsTransferCompleted(long flag);
+
 #ifdef __cplusplus
 }
 #endif

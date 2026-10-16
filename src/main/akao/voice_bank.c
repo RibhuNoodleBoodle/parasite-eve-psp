@@ -10,6 +10,7 @@
 #include "pe1/akao/voice_masks.h"
 #include "pe1/akao/voice_state.h"
 #include "pe1/akao_counters.h"
+#include "pe1/psyq_spu_api.h"
 #include "m2c_macros.h"
 
 void Akao_SetNotePitch(AkaoTrack *track, int arg);

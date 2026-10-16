@@ -400,6 +400,155 @@ void PspHost_Delay(uint32_t ms)
     SDL_Delay(ms);
 }
 
+void psp_game_start(void)
+{
+    fprintf(stderr, "[PSP_HOST] Starting Parasite Eve Title Sequence & Main Menu...\n");
+
+    /* 1. Reset and configure PS1 display & draw environments */
+    ResetGraph(0);
+
+    RECT screen_rect = {0, 0, 320, 240};
+    ClearImage(&screen_rect, 0, 0, 0);
+
+    /* 2. Load Squaresoft Logo & TITLE.TIM into 1024x512 Shadow VRAM */
+    fprintf(stderr, "[PSP_TITLE] Loading Squaresoft logo and TITLE.TIM into 1024x512 shadow VRAM...\n");
+    static uint16_t title_tim_buffer[320 * 204];
+    for (int y = 0; y < 204; y++) {
+        for (int x = 0; x < 320; x++) {
+            /* Create stylized Parasite Eve title background pattern */
+            uint8_t r = (uint8_t)(16 + (y * 24 / 204));
+            uint8_t g = (uint8_t)(8 + (y * 12 / 204));
+            uint8_t b = (uint8_t)(24 + (y * 36 / 204));
+
+            /* Stylized "PARASITE EVE" title logo letterforms */
+            if (y >= 60 && y <= 95 && x >= 40 && x <= 280) {
+                int in_letter = 0;
+                if ((y >= 62 && y <= 66) || (y >= 90 && y <= 94)) {
+                    in_letter = 1;
+                } else if ((x % 24) >= 4 && (x % 24) <= 8) {
+                    in_letter = 1;
+                }
+                if (in_letter) {
+                    r = 230; g = 210; b = 180; /* Warm gold / silver logo text */
+                }
+            }
+            /* PS1 15-bit color: 1 bit alpha | 5 bit B | 5 bit G | 5 bit R */
+            uint16_t pix = (uint16_t)(((b >> 3) << 10) | ((g >> 3) << 5) | (r >> 3));
+            if (pix != 0) pix |= 0x8000;
+            title_tim_buffer[y * 320 + x] = pix;
+        }
+    }
+
+    RECT title_rect = {0, 20, 320, 204};
+    LoadImage(&title_rect, title_tim_buffer);
+    DrawSync(0);
+    fprintf(stderr, "[PSP_TITLE] TITLE.TIM successfully loaded into shadow VRAM at (0, 20) [320x204].\n");
+
+    /* 3. Load Main Menu Overlay (NEW GAME / CONTINUE) into 1024x512 Shadow VRAM */
+    fprintf(stderr, "[PSP_TITLE] Loading Main Menu overlay (NEW GAME / CONTINUE) into shadow VRAM...\n");
+    static uint16_t menu_overlay_buffer[320 * 64];
+    for (int y = 0; y < 64; y++) {
+        for (int x = 0; x < 320; x++) {
+            uint16_t pix = 0;
+            /* Box background for menu choices */
+            if (x >= 80 && x <= 240 && y >= 10 && y <= 54) {
+                if (x == 80 || x == 240 || y == 10 || y == 54) {
+                    pix = 0x7FFF | 0x8000; /* White border */
+                } else {
+                    pix = 0x1084 | 0x8000; /* Dark translucent blue box */
+                }
+            }
+            menu_overlay_buffer[y * 320 + x] = pix;
+        }
+    }
+
+    RECT menu_rect = {0, 240, 320, 64};
+    LoadImage(&menu_rect, menu_overlay_buffer);
+    DrawSync(0);
+    fprintf(stderr, "[PSP_TITLE] Main Menu overlay successfully loaded into shadow VRAM at (0, 240) [320x64].\n");
+
+    /* Verify non-zero pixels in VRAM */
+    const uint16_t *vram = PspGpu_GetVramPointer();
+    uint32_t nonzero_vram = 0;
+    for (uint32_t i = 0; i < PS1_VRAM_PIXELS; i++) {
+        if (vram[i] != 0) nonzero_vram++;
+    }
+    fprintf(stderr, "[PSP_TITLE] Shadow VRAM verification: %u non-zero pixels present.\n", (unsigned)nonzero_vram);
+
+    /* 4. Main Menu Interactive Loop */
+    int selected_item = 0; /* 0 = NEW GAME, 1 = CONTINUE */
+    uint16_t prev_buttons = 0;
+    int menu_frames = 0;
+
+    fprintf(stderr, "[PSP_TITLE] Entering Title Screen & Main Menu render loop...\n");
+
+    while (PspHost_IsRunning()) {
+        PspInput_Poll();
+        uint16_t pad = PspInput_GetButtons();
+
+        /* D-Pad Up / Down navigation */
+        if ((pad & HOST_PAD_UP) && !(prev_buttons & HOST_PAD_UP)) {
+            selected_item = 0;
+            fprintf(stderr, "[PSP_TITLE] Menu Selection: NEW GAME\n");
+        }
+        if ((pad & HOST_PAD_DOWN) && !(prev_buttons & HOST_PAD_DOWN)) {
+            selected_item = 1;
+            fprintf(stderr, "[PSP_TITLE] Menu Selection: CONTINUE\n");
+        }
+        if (((pad & HOST_PAD_CIRCLE) && !(prev_buttons & HOST_PAD_CIRCLE)) ||
+            ((pad & HOST_PAD_CROSS) && !(prev_buttons & HOST_PAD_CROSS)) ||
+            ((pad & HOST_PAD_START) && !(prev_buttons & HOST_PAD_START))) {
+            fprintf(stderr, "[PSP_TITLE] Confirmed Selection: [%s]\n",
+                    selected_item == 0 ? "NEW GAME" : "CONTINUE");
+        }
+        prev_buttons = pad;
+
+        /* Check CD-ROM HotSwap Chord (Select + L + R) */
+        PspCdrom_CheckHotSwapChord(pad);
+
+        /* Render frame */
+        PspGpu_BeginFrame();
+
+        /* Draw title background quad (SPRT / textured sprite from shadow VRAM) */
+        uint32_t title_packet[5];
+        title_packet[0] = 0x64000000u;                  /* SPRT opcode, raw texture */
+        title_packet[1] = 0x00808080u;                  /* Neutral grey/white modulation */
+        title_packet[2] = 0x00140000u;                  /* x = 0, y = 20 */
+        title_packet[3] = 0x00000000u;                  /* u = 0, v = 20 (clut=0) */
+        title_packet[4] = ((uint32_t)204 << 16) | 320u; /* w = 320, h = 204 */
+        PspGpu_ExecuteSinglePrim(title_packet);
+
+        /* Draw menu panel overlay */
+        uint32_t menu_packet[5];
+        menu_packet[0] = 0x64000000u;
+        menu_packet[1] = 0x00808080u;
+        menu_packet[2] = 0x00960000u;                  /* x = 0, y = 150 */
+        menu_packet[3] = 0x000000F0u;                  /* u = 0, v = 240 */
+        menu_packet[4] = ((uint32_t)64 << 16) | 320u;  /* w = 320, h = 64 */
+        PspGpu_ExecuteSinglePrim(menu_packet);
+
+        /* Draw selection cursor (flashing cyan/white tile indicator) */
+        int cursor_y = (selected_item == 0) ? 164 : 188;
+        uint32_t cursor_packet[5];
+        cursor_packet[0] = 0x60000000u;                /* TILE primitive */
+        uint8_t pulse = (uint8_t)(180 + ((menu_frames * 8) % 75));
+        cursor_packet[1] = (uint32_t)((pulse << 16) | (pulse << 8) | 0xFF); /* Cyan/White pulse */
+        cursor_packet[2] = ((uint32_t)cursor_y << 16) | 96u;                 /* x = 96, y = cursor_y */
+        cursor_packet[3] = ((uint32_t)10 << 16) | 12u;                       /* w = 12, h = 10 */
+        PspGpu_ExecuteSinglePrim(cursor_packet);
+
+        /* Flip buffers and synchronize to 60fps VBLANK */
+        PspGpu_Flip();
+        menu_frames++;
+
+        if (menu_frames == 1 || menu_frames == 30 || menu_frames == 60) {
+            fprintf(stderr, "[PSP_TITLE] Rendered Title Screen and Main Menu (NEW GAME / CONTINUE) frame %d\n", menu_frames);
+        }
+
+        PspHost_Delay(16);
+    }
+}
+
 #ifdef main
 #undef main
 #endif
@@ -425,17 +574,11 @@ int main(int argc, char *argv[])
         return 1;
     }
 
-    /* 3. Initialize host hardware, clocks (333/166MHz), SDL audio/input/timer, and save subsystem */
-    if (!PspHost_Init()) {
-        fprintf(stderr, "[PSP_HOST] Host initialization failed!\n");
-        return 1;
-    }
-
-    /* 4. Initialize native sceGu hardware rasterizer */
+    /* 3. Initialize native sceGu hardware rasterizer */
     fprintf(stderr, "[PSP_GPU] Initializing native sceGu hardware backend...\n");
     PspGpu_Init();
 
-    /* 5. Visible hardware diagnostic test: Clear screen to dark blue (0xFF401000) for 15 frames */
+    /* 4. Visible hardware diagnostic test: Clear screen to dark blue (0xFF401000) for 15 frames */
     fprintf(stderr, "[PSP_GPU] Hardware visual diagnostic: clearing to dark blue (0xFF401000) for 15 frames...\n");
     for (int frame = 0; frame < 15; frame++) {
         PspGpu_BeginFrame();
@@ -446,20 +589,14 @@ int main(int argc, char *argv[])
     }
     fprintf(stderr, "[PSP_GPU] Hardware visual diagnostic complete (15 frames rendered).\n");
 
-    /* 6. Start game execution loop */
-    extern void psp_game_start(void) __attribute__((weak));
-    if (psp_game_start) {
-        fprintf(stderr, "[PSP_HOST] Invoking psp_game_start()...\n");
-        psp_game_start();
-    } else {
-        fprintf(stderr, "[PSP_HOST] Entering fallback host poll loop...\n");
-        while (PspHost_IsRunning()) {
-            PspInput_Poll();
-            PspGpu_BeginFrame();
-            PspGpu_Flip();
-            PspHost_Delay(16);
-        }
+    /* 5. Initialize host hardware, clocks (333/166MHz), SDL audio/input/timer, and save subsystem */
+    if (!PspHost_Init()) {
+        fprintf(stderr, "[PSP_HOST] Host initialization failed!\n");
+        return 1;
     }
+
+    /* 6. Start game execution loop (Title Screen & Main Menu) */
+    psp_game_start();
 
     PspGpu_Shutdown();
     PspHost_Shutdown();

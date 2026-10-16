@@ -50,9 +50,14 @@ int ChangeClearRCnt(int counter, int enabled);
     __asm__ volatile("syscall" : "=r"(result), "=r"(selector) \
                      : "1"(selector) : "memory")
 
+#if !defined(__psp__) && !defined(ENABLE_PSP)
 void bzero(void *destination, int length);
 void *memcpy(void *destination, const void *source, unsigned int length);
 char *strcpy(char *destination, char *source);
+#else
+#include <string.h>
+#include <strings.h>
+#endif
 
 int DeliverEvent(unsigned int event, int spec);
 

@@ -11,7 +11,7 @@ EXTRACTED_BIN="$PPSSPP_DIR/AppDir/AppRun"
 LOG_FILE="$PPSSPP_DIR/ppsspp_debug.log"
 CONFIG_FILE="$PPSSPP_DIR/ppsspp_debug.ini"
 EBOOT_PATH="$ROOT_DIR/dist/PSP/GAME/ParasiteEve/EBOOT.PBP"
-TIMEOUT_SECS=8
+TIMEOUT_SECS=10
 
 mkdir -p "$PPSSPP_DIR"
 

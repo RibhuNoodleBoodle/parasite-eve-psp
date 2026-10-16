@@ -107,6 +107,9 @@ static int cdrom_worker_thread(void *arg)
 {
     (void)arg;
 
+    /* Lower thread priority so background reader never starves main thread */
+    sceKernelChangeThreadPriority(0, 0x38);
+
     while (s_cd.worker_running) {
         uint32_t next_lba;
         uint32_t write_slot;
@@ -115,8 +118,9 @@ static int cdrom_worker_thread(void *arg)
 
         SDL_LockMutex(s_cd.lock);
 
-        /* Wait while ring buffer is completely full or paused */
-        while (s_cd.worker_running && !s_cd.seeking && s_cd.ring_count >= PSP_CDROM_RING_SECTORS) {
+        /* Wait while ring buffer is completely full, paused, or idle */
+        while (s_cd.worker_running && !s_cd.seeking &&
+               ((s_cd.ring_count >= PSP_CDROM_RING_SECTORS) || !(s_cd.status & PSP_CD_STAT_READING))) {
             SDL_CondWait(s_cd.cond_space_avail, s_cd.lock);
         }
 
@@ -159,10 +163,12 @@ static int cdrom_worker_thread(void *arg)
             s_cd.ring_write_idx = (s_cd.ring_write_idx + 1u) % PSP_CDROM_RING_SECTORS;
             s_cd.ring_count++;
             s_cd.current_lba++;
-            s_cd.status |= PSP_CD_STAT_READING;
             SDL_CondSignal(s_cd.cond_data_avail);
         }
         SDL_UnlockMutex(s_cd.lock);
+
+        /* Yield briefly to give time to main user thread */
+        sceKernelDelayThread(200);
     }
 
     return 0;
@@ -386,7 +392,7 @@ found:
         s_cd.total_sectors = (uint32_t)(size / PSP_CDROM_SECTOR_RAW);
         s_cd.current_lba = 0;
         s_cd.target_lba = 0;
-        s_cd.seeking = 1;
+        s_cd.seeking = 0;
         s_cd.active_disc = disc_num;
         s_cd.status = 0x02; /* CdlStatStandby */
 

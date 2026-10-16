@@ -494,3 +494,9 @@ int HostAudio_QueueFrames(void)
 {
     return PspAudio_QueueFrames();
 }
+
+long SpuIsTransferCompleted(long flag)
+{
+    (void)flag;
+    return 1;
+}
