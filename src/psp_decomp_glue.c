@@ -95,14 +95,18 @@ u8 *g_ObjectTextureBlobMidWriteOnly = NULL;
 u8 *g_ScriptSpriteBuffer = NULL;
 u8 *g_ScenePmSlotBanks = NULL;
 u8 *g_SceneObjectWork = NULL;
-u8 *D_8010BD00 = NULL;
-u8 *D_80120D08 = NULL;
+u8 __attribute__((aligned(16))) D_8010BD00[0x15008];
+u8 __attribute__((aligned(16))) D_80120D08[0x70000];
 
 int g_ActiveDrawSlot = 0;
 volatile unsigned char g_SceneInitSubphase = 0;
 
-u32 g_OtBufferTable[2][4096];
-u32 g_RenderOtBufferBaseAlt[2][4096];
+static u32 s_ot_storage[2][4096];
+u8 *g_OtBufferTable[2] = { (u8 *)s_ot_storage[0], (u8 *)s_ot_storage[1] };
+__asm__(
+    ".globl g_RenderOtBufferBaseAlt\n"
+    ".set g_RenderOtBufferBaseAlt, g_OtBufferTable + 4\n"
+);
 
 u8  g_RenderScratchBuffer[0x8000];
 u8 *g_RenderScratchBufferBase[2] = {g_RenderScratchBuffer, g_RenderScratchBuffer};
@@ -315,12 +319,12 @@ void Boot_RunFrame(void) {
         }
     }
 
-    ClearOTagR(g_OtBufferTable[g_ActiveDrawSlot], 0x1000);
+    ClearOTagR((u32 *)g_OtBufferTable[g_ActiveDrawSlot], 0x1000);
     Draw_RenderFrame();
 }
 
 void Draw_RenderFrame(void) {
-    PspGpu_DrawOTag(g_OtBufferTable[g_ActiveDrawSlot], 0x1000);
+    PspGpu_DrawOTag((const u32 *)g_OtBufferTable[g_ActiveDrawSlot], 0x1000);
     VSync(0);
 }
 

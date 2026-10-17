@@ -106,7 +106,7 @@ echo ""
 RUN_TIMEOUT="${RUN_TIMEOUT:-40s}"
 echo "=== [Step 3] Running Portable PPSSPP AppImage (${RUN_TIMEOUT} timeout) ==="
 rm -f "$LOG_FILE" "$PPSSPP_DIR/ probe"*.log 2>/dev/null || true
-rm -f "$ROOT_DIR"/frame_dump*.ppm "$ROOT_DIR/dist"/frame_dump*.ppm "$ROOT_DIR/dist/PSP/GAME/ParasiteEve"/frame_dump*.ppm "$PPSSPP_DIR"/frame_dump*.ppm "$PPSSPP_DIR/.config/ppsspp"/frame_dump*.ppm 2>/dev/null || true
+rm -f "$ROOT_DIR"/frame_dump*.ppm "$ROOT_DIR/dist"/frame_dump*.ppm "$ROOT_DIR/dist/PSP/GAME/ParasiteEve"/frame_dump*.ppm "$PPSSPP_DIR"/frame_dump*.ppm "$PPSSPP_DIR/.config/ppsspp"/frame_dump*.ppm "$PPSSPP_DIR/.config/ppsspp/PSP/GAME/ParasiteEve"/frame_dump*.ppm 2>/dev/null || true
 touch "$ROOT_DIR/dist/PSP/GAME/ParasiteEve/frame_dump_enable.flag" 2>/dev/null || true
 touch "$MEMSTICK_GAME_DIR/frame_dump_enable.flag" 2>/dev/null || true
 
