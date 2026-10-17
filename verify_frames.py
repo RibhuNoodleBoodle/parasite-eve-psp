@@ -20,6 +20,7 @@ TARGET_FRAMES = [
     ("Intro FMV", "frame_dump_intro_fmv.ppm"),
     ("Title Screen", "frame_dump_title.ppm"),
     ("New Game", "frame_dump_newgame.ppm"),
+    ("Carnegie Hall", "frame_dump_carnegie.ppm"),
 ]
 
 SEARCH_DIRS = [

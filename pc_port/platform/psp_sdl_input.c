@@ -208,47 +208,46 @@ void PspInput_Poll(void)
     if (s_autotest == 1) {
         /*
          * Staged Auto-Input Timeline:
-         * Frame 1..249: Zero synthetic input (Square EA notice & Intro FMV stream freely; dumps frame_dump_intro_fmv.ppm at frame 150).
-         * Frame 250..255: Single START pulse to skip Intro FMV to Title screen.
-         * Frame 256..349: Zero synthetic input (Title screen displays and dumps frame_dump_title.ppm at frame 310).
-         * Frame 350..355: Single START pulse to open "NEW GAME / CONTINUE" menu.
-         * Frame 356..419: Zero synthetic input (menu displays).
-         * Frame 420..425: Single CROSS pulse to confirm NEW GAME.
-         * Frame 426..539: Zero synthetic input (FMV002 Opera Opening plays and dumps frame_dump_newgame.ppm at frame 500).
-         * Frame 540..545: Single START pulse to advance from FMV002 into Carnegie Hall field scene (0xA8000148).
+         * Frame 1..179: Zero synthetic input (Square EA notice & Intro FMV stream freely; dumps frame_dump_intro_fmv.ppm at frame 140).
+         * Frame 180..185: Single START pulse to skip Intro FMV to Title screen.
+         * Frame 186..264: Zero synthetic input (Title screen displays and dumps frame_dump_title.ppm at frame 240).
+         * Frame 265..270: Single START pulse to open "NEW GAME / CONTINUE" menu.
+         * Frame 271..329: Zero synthetic input (menu displays).
+         * Frame 330..335: Single CROSS pulse to confirm NEW GAME.
+         * Frame 336..419: Zero synthetic input (FMV002 Opera Opening plays and dumps frame_dump_newgame.ppm at frame 395).
+         * Frame 420..425: Single START pulse to advance from FMV002 into Carnegie Hall field scene (0xA8000148).
          */
         uint32_t current_frame = PspGpu_GetFrameCounter();
         static uint32_t s_last_injected_start1 = 0;
         static uint32_t s_last_injected_start2 = 0;
         static uint32_t s_last_injected_cross = 0;
         static uint32_t s_last_injected_start3 = 0;
-        if (current_frame >= 250 && current_frame <= 255) {
+        if (current_frame >= 180 && current_frame <= 185) {
             buttons |= HOST_PAD_START;
             if (s_last_injected_start1 != current_frame) {
                 s_last_injected_start1 = current_frame;
                 fprintf(stderr, "[NEW-GAME-TRACE] Auto-input: START injected to skip Intro FMV (frame %u)\n", (unsigned)current_frame);
             }
         }
-        if (current_frame >= 350 && current_frame <= 355) {
+        if (current_frame >= 265 && current_frame <= 270) {
             buttons |= HOST_PAD_START;
             if (s_last_injected_start2 != current_frame) {
                 s_last_injected_start2 = current_frame;
                 fprintf(stderr, "[NEW-GAME-TRACE] Auto-input: START injected to open NEW GAME menu (frame %u)\n", (unsigned)current_frame);
             }
         }
-        if (current_frame >= 420 && current_frame <= 425) {
+        if (current_frame >= 330 && current_frame <= 335) {
             buttons |= HOST_PAD_CROSS;
             if (s_last_injected_cross != current_frame) {
                 s_last_injected_cross = current_frame;
                 fprintf(stderr, "[NEW-GAME-TRACE] Auto-input: CROSS injected for NEW GAME (frame %u)\n", (unsigned)current_frame);
             }
         }
-        if (current_frame >= 540 && current_frame <= 545) {
+        extern int g_SceneDispatchToken;
+        if (current_frame >= 420 && s_last_injected_start3 == 0 && (uint32_t)g_SceneDispatchToken == 0xA80830C8u) {
             buttons |= HOST_PAD_START;
-            if (s_last_injected_start3 != current_frame) {
-                s_last_injected_start3 = current_frame;
-                fprintf(stderr, "[NEW-GAME-TRACE] Auto-input: START injected to enter Carnegie Hall stage (frame %u)\n", (unsigned)current_frame);
-            }
+            s_last_injected_start3 = current_frame;
+            fprintf(stderr, "[NEW-GAME-TRACE] Auto-input: START injected to enter Carnegie Hall stage (frame %u)\n", (unsigned)current_frame);
         }
     }
 

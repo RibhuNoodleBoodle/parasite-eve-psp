@@ -1872,10 +1872,10 @@ int PspStr_StreamVideo(uint32_t start_lba, uint32_t sector_count,
         }
     }
 
-    /* Restore authentic 16-bit DISPENV after video streaming */
+    /* Keep DISPENV matching decoded VRAM color depth after video streaming */
     DISPENV env_end;
     SetDefDispEnv(&env_end, 0, 0, tex_width, tex_height);
-    env_end.isrgb24 = 0;
+    env_end.isrgb24 = is_16bit ? 0 : 1;
     PutDispEnv(&env_end);
 
     fprintf(stderr, "[PSP_STR] Video stream finished: %u frames rendered\n", (unsigned)frames_rendered);

@@ -312,11 +312,15 @@ void Boot_RunFrame(void) {
             g_GameState.flags |= 1;
             Scene_LoadFieldBg();
 
+            /* Stream Carnegie Hall theater interior stage scene from LBA 111505 */
+            PspStr_StreamVideo(111505, 36, NULL, 320, 240, 0);
+
             /* Keep 24-bit 4:3 centered DISPENV active for Carnegie Hall stage framebuffer */
-            DISPENV stage_env;
-            SetDefDispEnv(&stage_env, 0, 0, 320, 240);
-            stage_env.isrgb24 = 1;
-            PutDispEnv(&stage_env);
+            for (int i = 0; i < 2; i++) {
+                SetDefDispEnv(&g_RenderDispEnvArray[i], 0, 0, 320, 240);
+                g_RenderDispEnvArray[i].isrgb24 = 1;
+            }
+            PutDispEnv(&g_RenderDispEnvArray[0]);
             SetDispMask(1);
         }
     }

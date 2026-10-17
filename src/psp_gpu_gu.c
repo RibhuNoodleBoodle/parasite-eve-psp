@@ -1515,10 +1515,10 @@ int VSync(int mode) {
 
     int is_log_frame = (g_psp_gpu.frame_counter % 60 == 0);
     int should_dump_logo = (s_enable_frame_dump && g_psp_gpu.frame_counter >= 50 && g_psp_gpu.frame_counter <= 65 && !s_dumped_logo);
-    int should_dump_intro = (s_enable_frame_dump && g_psp_gpu.frame_counter >= 150 && g_psp_gpu.frame_counter <= 180 && !s_dumped_intro);
-    int should_dump_title = (s_enable_frame_dump && g_psp_gpu.frame_counter >= 310 && g_psp_gpu.frame_counter <= 335 && !s_dumped_title);
-    int should_dump_newgame = (s_enable_frame_dump && ((g_psp_gpu.frame_counter >= 500 && g_psp_gpu.frame_counter <= 530) || is_carnegie) && !s_dumped_newgame);
-    int should_dump_carnegie = (s_enable_frame_dump && is_carnegie && !s_dumped_carnegie);
+    int should_dump_intro = (s_enable_frame_dump && g_psp_gpu.frame_counter >= 135 && g_psp_gpu.frame_counter <= 165 && !s_dumped_intro);
+    int should_dump_title = (s_enable_frame_dump && g_psp_gpu.frame_counter >= 235 && g_psp_gpu.frame_counter <= 260 && !s_dumped_title);
+    int should_dump_newgame = (s_enable_frame_dump && g_psp_gpu.frame_counter >= 390 && g_psp_gpu.frame_counter <= 415 && !s_dumped_newgame);
+    int should_dump_carnegie = (s_enable_frame_dump && is_carnegie && g_psp_gpu.frame_counter >= 422 && !s_dumped_carnegie);
 
     if (is_log_frame || should_dump_logo || should_dump_intro || should_dump_title || should_dump_newgame || should_dump_carnegie) {
         uint32_t vram_nonzero = 0;
