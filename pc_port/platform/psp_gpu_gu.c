@@ -1437,16 +1437,34 @@ void psp_write_ppm_screenshot(const char *path, const uint16_t *fb) {
     const char *hdr = "P6\n480 272\n255\n";
     sceIoWrite(fd, hdr, 15);
 
+    int disp_w = (g_psp_gpu.current_dispenv.disp.w > 0) ? g_psp_gpu.current_dispenv.disp.w : 320;
+    int disp_h = (g_psp_gpu.current_dispenv.disp.h > 0) ? g_psp_gpu.current_dispenv.disp.h : 240;
+
     for (int y = 0; y < PSP_SCREEN_HEIGHT; y++) {
+        int src_y = (y * disp_h) / PSP_SCREEN_HEIGHT;
         const uint16_t *row = &fb[y * PSP_BUFFER_STRIDE];
         for (int x = 0; x < PSP_SCREEN_WIDTH; x++) {
-            uint16_t c = row[x];
-            uint8_t r = (uint8_t)((c & 0x1F) << 3);
-            uint8_t g = (uint8_t)(((c >> 5) & 0x1F) << 3);
-            uint8_t b = (uint8_t)(((c >> 10) & 0x1F) << 3);
-            s_ppm_row[x * 3 + 0] = r | (r >> 5);
-            s_ppm_row[x * 3 + 1] = g | (g >> 5);
-            s_ppm_row[x * 3 + 2] = b | (b >> 5);
+            if (g_psp_gpu.current_dispenv.isrgb24) {
+                if (x >= 59 && x < 59 + 362) {
+                    int src_x = ((x - 59) * disp_w) / 362;
+                    uint32_t c32 = s_dispenv_tex32[src_y * 512 + src_x];
+                    s_ppm_row[x * 3 + 0] = (uint8_t)(c32 & 0xFF);
+                    s_ppm_row[x * 3 + 1] = (uint8_t)((c32 >> 8) & 0xFF);
+                    s_ppm_row[x * 3 + 2] = (uint8_t)((c32 >> 16) & 0xFF);
+                } else {
+                    s_ppm_row[x * 3 + 0] = 0;
+                    s_ppm_row[x * 3 + 1] = 0;
+                    s_ppm_row[x * 3 + 2] = 0;
+                }
+            } else {
+                uint16_t c = row[x];
+                uint8_t r = (uint8_t)((c & 0x1F) << 3);
+                uint8_t g = (uint8_t)(((c >> 5) & 0x1F) << 3);
+                uint8_t b = (uint8_t)(((c >> 10) & 0x1F) << 3);
+                s_ppm_row[x * 3 + 0] = r | (r >> 5);
+                s_ppm_row[x * 3 + 1] = g | (g >> 5);
+                s_ppm_row[x * 3 + 2] = b | (b >> 5);
+            }
         }
         sceIoWrite(fd, s_ppm_row, sizeof(s_ppm_row));
     }
@@ -1496,10 +1514,10 @@ int VSync(int mode) {
     }
 
     int is_log_frame = (g_psp_gpu.frame_counter % 60 == 0);
-    int should_dump_logo = (s_enable_frame_dump && g_psp_gpu.frame_counter >= 55 && g_psp_gpu.frame_counter <= 65 && !s_dumped_logo);
-    int should_dump_intro = (s_enable_frame_dump && g_psp_gpu.frame_counter >= 340 && g_psp_gpu.frame_counter <= 360 && !s_dumped_intro);
-    int should_dump_title = (s_enable_frame_dump && g_psp_gpu.frame_counter >= 575 && g_psp_gpu.frame_counter <= 590 && !s_dumped_title);
-    int should_dump_newgame = (s_enable_frame_dump && ((g_psp_gpu.frame_counter >= 850 && g_psp_gpu.frame_counter <= 950) || is_carnegie) && !s_dumped_newgame);
+    int should_dump_logo = (s_enable_frame_dump && g_psp_gpu.frame_counter >= 50 && g_psp_gpu.frame_counter <= 65 && !s_dumped_logo);
+    int should_dump_intro = (s_enable_frame_dump && g_psp_gpu.frame_counter >= 150 && g_psp_gpu.frame_counter <= 180 && !s_dumped_intro);
+    int should_dump_title = (s_enable_frame_dump && g_psp_gpu.frame_counter >= 310 && g_psp_gpu.frame_counter <= 335 && !s_dumped_title);
+    int should_dump_newgame = (s_enable_frame_dump && ((g_psp_gpu.frame_counter >= 500 && g_psp_gpu.frame_counter <= 530) || is_carnegie) && !s_dumped_newgame);
     int should_dump_carnegie = (s_enable_frame_dump && is_carnegie && !s_dumped_carnegie);
 
     if (is_log_frame || should_dump_logo || should_dump_intro || should_dump_title || should_dump_newgame || should_dump_carnegie) {
@@ -1516,7 +1534,7 @@ int VSync(int mode) {
         for (int y = 0; y < PSP_SCREEN_HEIGHT; y++) {
             int src_y = (y * disp_h) / PSP_SCREEN_HEIGHT;
             for (int x = 0; x < PSP_SCREEN_WIDTH; x++) {
-                uint16_t out_pix = 0x8000u;
+                uint16_t out_pix = edram_disp[y * PSP_BUFFER_STRIDE + x];
                 if (x >= 59 && x < 59 + 362) {
                     int src_x = ((x - 59) * disp_w) / 362;
                     if (g_psp_gpu.current_dispenv.isrgb24) {
@@ -1526,8 +1544,11 @@ int VSync(int mode) {
                         uint8_t b = (uint8_t)((c32 >> 16) & 0xFF);
                         out_pix = (uint16_t)(((b >> 3) << 10) | ((g >> 3) << 5) | (r >> 3) | 0x8000u);
                     } else {
-                        out_pix = s_dispenv_tex[src_y * 512 + src_x];
+                        uint16_t v_pix = s_dispenv_tex[src_y * 512 + src_x];
+                        if ((v_pix & 0x7FFFu) != 0) out_pix = v_pix;
                     }
+                } else {
+                    out_pix = 0x8000u;
                 }
                 edram_disp[y * PSP_BUFFER_STRIDE + x] = out_pix;
                 if ((out_pix & 0x7FFFu) != 0) {
@@ -1575,6 +1596,8 @@ int VSync(int mode) {
             s_dumped_carnegie = 1;
             psp_write_ppm_screenshot("ms0:/frame_dump_carnegie.ppm", edram_disp);
             psp_write_ppm_screenshot("frame_dump_carnegie.ppm", edram_disp);
+            psp_write_ppm_screenshot("ms0:/frame_dump.ppm", edram_disp);
+            psp_write_ppm_screenshot("frame_dump.ppm", edram_disp);
         }
     }
 

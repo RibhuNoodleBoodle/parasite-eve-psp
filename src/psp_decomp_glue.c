@@ -293,8 +293,8 @@ void Boot_RunFrame(void) {
         if (!s_prologue_inited) {
             s_prologue_inited = 1;
             fprintf(stderr, "[NEW-GAME-TRACE] Dispatching New Game prologue scene (0xA80830C8) -> FMV002 Opera Opening\n");
-            /* Stream authentic FMV002 Opera Opening movie from Disc 1 LBA 103206 */
-            PspStr_StreamVideo(103206, 10232, NULL, 320, 240, 0);
+            /* Stream authentic FMV002 Opera Opening movie from Disc 1 LBA 103606 */
+            PspStr_StreamVideo(103606, 9832, NULL, 320, 240, 0);
         }
         /* Step the prologue: after initial movie playback, transition to Carnegie Hall */
         g_SceneDispatchToken = 0xA8000148;
@@ -309,11 +309,13 @@ void Boot_RunFrame(void) {
             s_stage_inited = 1;
             fprintf(stderr, "[NEW-GAME-TRACE] Activating Carnegie Hall stage overlay room_m005_theater\n");
             PspOverlay_Activate("room_m005_theater");
+            g_GameState.flags |= 1;
+            Scene_LoadFieldBg();
 
-            /* Set up 16-bit 4:3 centered DISPENV for Carnegie Hall gameplay */
+            /* Keep 24-bit 4:3 centered DISPENV active for Carnegie Hall stage framebuffer */
             DISPENV stage_env;
             SetDefDispEnv(&stage_env, 0, 0, 320, 240);
-            stage_env.isrgb24 = 0;
+            stage_env.isrgb24 = 1;
             PutDispEnv(&stage_env);
             SetDispMask(1);
         }
@@ -379,17 +381,30 @@ int MenuCard_PlayVideo(int vid) {
         start_lba = 101705; /* FMV000.STR (Square logo) */
         sector_count = 1501;
     } else if (vid == 1) {
-        start_lba = 189742; /* FMV001.STR (CGI intro) */
-        sector_count = 15883;
+        start_lba = 189842; /* FMV001.STR (CGI intro action) */
+        sector_count = 15783;
     } else if (vid == 2) {
-        start_lba = 103206; /* FMV002.STR (Carnegie Hall Opera opening) */
-        sector_count = 10232;
+        start_lba = 103606; /* FMV002.STR (Carnegie Hall Opera opening) */
+        sector_count = 9832;
     }
 
     if (start_lba > 0) {
         fprintf(stderr, "[PE-PSP] MenuCard_PlayVideo(%d) -> streaming movie from LBA %u (%u sectors)\n",
                 vid, (unsigned)start_lba, (unsigned)sector_count);
-        return PspStr_StreamVideo(start_lba, sector_count, NULL, 320, 240, 0);
+        PspStr_StreamVideo(start_lba, sector_count, NULL, 320, 240, 0);
+
+        /* Restore 24-bit double-buffered DISPENV/DRAWENV expected by MenuCard_RunListScreen */
+        SetDefDispEnv(&g_RenderDispEnvArray[0], 0, 240, 320, 240);
+        g_RenderDispEnvArray[0].isrgb24 = 1;
+        SetDefDrawEnv(&g_RenderDrawEnvArray[0], 0, 0, 320, 240);
+        g_RenderDrawEnvArray[0].isbg = 1;
+        g_RenderDrawEnvArray[0].dtd = 1;
+
+        SetDefDispEnv(&g_RenderDispEnvArray[1], 0, 0, 320, 240);
+        g_RenderDispEnvArray[1].isrgb24 = 1;
+        SetDefDrawEnv(&g_RenderDrawEnvArray[1], 0, 240, 320, 240);
+        g_RenderDrawEnvArray[1].isbg = 1;
+        g_RenderDrawEnvArray[1].dtd = 1;
     }
     return 0;
 }

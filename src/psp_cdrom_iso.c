@@ -69,27 +69,27 @@ static PspCdromState s_cd;
 
 static PspMdecState s_mdec;
 
-/* Standard JPEG/PS1 default luminance and chrominance quantization tables */
+/* Authentic PlayStation 1 MDEC default quantization matrix (DC quant[0] = 2) */
 static const uint8_t s_default_luma_quant[64] = {
-    16, 11, 10, 16, 24, 40, 51, 61,
-    12, 12, 14, 19, 26, 58, 60, 55,
-    14, 13, 16, 24, 40, 57, 69, 56,
-    14, 17, 22, 29, 51, 87, 80, 62,
-    18, 22, 37, 56, 68, 109, 103, 77,
-    24, 35, 55, 64, 81, 104, 113, 92,
-    49, 64, 78, 87, 103, 121, 120, 101,
-    72, 92, 95, 98, 112, 100, 103, 99
+     2, 16, 19, 22, 26, 27, 29, 34,
+    16, 16, 22, 24, 27, 29, 34, 37,
+    19, 22, 26, 27, 29, 34, 34, 38,
+    22, 22, 26, 27, 29, 34, 37, 40,
+    22, 26, 27, 29, 32, 35, 40, 48,
+    26, 27, 29, 32, 35, 40, 48, 58,
+    26, 27, 29, 34, 38, 46, 56, 69,
+    27, 29, 35, 38, 46, 56, 69, 83
 };
 
 static const uint8_t s_default_chroma_quant[64] = {
-    17, 18, 24, 47, 99, 99, 99, 99,
-    18, 21, 26, 66, 99, 99, 99, 99,
-    24, 26, 56, 99, 99, 99, 99, 99,
-    47, 66, 99, 99, 99, 99, 99, 99,
-    99, 99, 99, 99, 99, 99, 99, 99,
-    99, 99, 99, 99, 99, 99, 99, 99,
-    99, 99, 99, 99, 99, 99, 99, 99,
-    99, 99, 99, 99, 99, 99, 99, 99
+     2, 16, 19, 22, 26, 27, 29, 34,
+    16, 16, 22, 24, 27, 29, 34, 37,
+    19, 22, 26, 27, 29, 34, 34, 38,
+    22, 22, 26, 27, 29, 34, 37, 40,
+    22, 26, 27, 29, 32, 35, 40, 48,
+    26, 27, 29, 32, 35, 40, 48, 58,
+    26, 27, 29, 34, 38, 46, 56, 69,
+    27, 29, 35, 38, 46, 56, 69, 83
 };
 
 /* Zigzag order mapping for 8x8 blocks */
@@ -1234,6 +1234,12 @@ static void mdec_idct_8x8(int32_t block[64])
 
     /* Pass 1: Columns (frequency u -> spatial y) */
     for (int x = 0; x < 8; x++) {
+        int col_or = block[x] | block[x + 8] | block[x + 16] | block[x + 24] |
+                     block[x + 32] | block[x + 40] | block[x + 48] | block[x + 56];
+        if (col_or == 0) {
+            for (int y = 0; y < 8; y++) temp[x + y * 8] = 0;
+            continue;
+        }
         for (int y = 0; y < 8; y++) {
             int32_t sum = 0;
             for (int u = 0; u < 8; u++) {
@@ -1271,10 +1277,10 @@ static int decode_block(const uint16_t *input, size_t input_words, size_t *pos,
     memset(block, 0, 64 * sizeof(int32_t));
     if (*pos >= input_words) return 0;
 
-    /* If block is completely empty (EOB marker only) */
+    /* Skip any leading EOB padding words */
     if (input[*pos] == 0xFE00u) {
         (*pos)++;
-        return 1;
+        return 0;
     }
 
     uint16_t code = input[(*pos)++];
@@ -1283,12 +1289,12 @@ static int decode_block(const uint16_t *input, size_t input_words, size_t *pos,
 
     for (;;) {
         int32_t val = signed_10bit(code);
-        if (!scale) {
-            val *= 2;
-        } else if (k == 0) {
-            val *= quant[0];
+        if (k == 0) {
+            val = val * quant[0];
+        } else if (scale == 0) {
+            val = val * 2;
         } else {
-            val = (int32_t)(((int64_t)val * quant[k] * scale + 4) >> 3);
+            val = (int32_t)(((int64_t)val * quant[s_zigzag[k]] * scale + 4) >> 3);
         }
 
         block[s_zigzag[k]] = clamp_val(val, -1024, 1023);
@@ -1685,8 +1691,8 @@ int PspStr_DecodeFrame(const uint8_t *str_chunk_stream, size_t total_bytes,
 
     int32_t mb_blocks[6][64];
 
-    for (int mb_y = 0; mb_y < mb_rows; mb_y++) {
-        for (int mb_x = 0; mb_x < mb_cols; mb_x++) {
+    for (int mb_x = 0; mb_x < mb_cols; mb_x++) {
+        for (int mb_y = 0; mb_y < mb_rows; mb_y++) {
             /* 1. Decode Cr (block 0) and Cb (block 1) */
             if (!decode_block(words, num_words, &word_pos, mb_blocks[0], s_mdec.quant_chroma)) break;
             if (!decode_block(words, num_words, &word_pos, mb_blocks[1], s_mdec.quant_chroma)) break;
