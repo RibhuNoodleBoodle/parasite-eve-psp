@@ -187,6 +187,8 @@ void MenuCard_ShowLogoFade(void) {
         DrawPrim(sprite);
         sprite++;
         sprite->r0 = sprite->g0 = sprite->b0 = shade;
+        DrawPrim(tpage + 1);
+        DrawPrim(sprite);
         DrawSync(0);
         if (g_MemcardCurrentScreen->overlay.w > 0) {
             overlay = g_MemcardCurrentScreen->overlay;

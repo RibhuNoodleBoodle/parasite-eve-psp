@@ -451,6 +451,7 @@ int PspGpu_LoadImage(const RECT *rect, const void *pixels) {
     /* Writeback D-Cache so GPU texture sampler sees the new pixel data */
     sceKernelDcacheWritebackInvalidateRange(g_ps1_vram, sizeof(g_ps1_vram));
     g_psp_gpu.textures_uploaded++;
+    g_psp_gpu.vram_dirty = 1;
     return 1;
 }
 
@@ -496,6 +497,7 @@ int PspGpu_MoveImage(const RECT *src, int dst_x, int dst_y) {
 
     sceKernelDcacheWritebackInvalidateRange(g_ps1_vram, sizeof(g_ps1_vram));
     g_psp_gpu.textures_uploaded++;
+    g_psp_gpu.vram_dirty = 1;
     return 1;
 }
 
@@ -519,6 +521,7 @@ void PspGpu_ClearImage(const RECT *rect, uint8_t r, uint8_t g, uint8_t b) {
 
     sceKernelDcacheWritebackInvalidateRange(g_ps1_vram, sizeof(g_ps1_vram));
     g_psp_gpu.textures_uploaded++;
+    g_psp_gpu.vram_dirty = 1;
 }
 
 /* ------------------------------------------------------------------------------
@@ -550,6 +553,7 @@ DISPENV *PspGpu_PutDispEnv(const DISPENV *env) {
     if (env) {
         g_psp_gpu.current_dispenv = *env;
         g_psp_gpu.has_dispenv = 1;
+        g_psp_gpu.dispenv_dirty = 1;
     }
     return (DISPENV *)env;
 }
@@ -1094,6 +1098,78 @@ void PspGpu_ExecuteSinglePrim(const uint32_t *packet) {
         ApplySemiTransparency(is_semi_trans, abr_mode);
         ApplyTexture(g_psp_gpu.current_tpage, clut, is_raw_tex);
 
+        /* Rasterize into shadow VRAM so authentic PS1 VRAM scanout sees all primitive pixels */
+        uint32_t depth   = (g_psp_gpu.current_tpage >> 7) & 0x03;
+        uint32_t clut_x  = (clut & 0x3F) * 16;
+        uint32_t clut_y  = (clut >> 6) & 0x1FF;
+        uint32_t tpage_x = (g_psp_gpu.current_tpage & 0x0F) * 64;
+        uint32_t tpage_y = ((g_psp_gpu.current_tpage >> 4) & 0x01) * 256;
+
+        int dst_base_x = (x + g_psp_gpu.offset_x) & 0x3FF;
+        int dst_base_y = (y + g_psp_gpu.offset_y) & 0x1FF;
+
+        uint16_t palette[256];
+        int num_colors = (depth == 0) ? 16 : 256;
+        const uint16_t *clut_ptr = &g_ps1_vram[clut_y * PS1_VRAM_WIDTH + clut_x];
+        for (int i = 0; i < num_colors; i++) {
+            palette[i] = clut_ptr[i];
+        }
+
+        uint8_t scale_r = PsxScaleColor(r);
+        uint8_t scale_g = PsxScaleColor(g);
+        uint8_t scale_b = PsxScaleColor(b);
+
+        for (int dy = 0; dy < h; dy++) {
+            int vy = (tpage_y + v + dy) & 0x1FF;
+            int py = (dst_base_y + dy) & 0x1FF;
+            const uint16_t *vram_src = &g_ps1_vram[vy * PS1_VRAM_WIDTH];
+            uint16_t *vram_dst = &g_ps1_vram[py * PS1_VRAM_WIDTH];
+
+            for (int dx = 0; dx < w; dx++) {
+                int px = (dst_base_x + dx) & 0x3FF;
+                uint16_t pix = 0;
+
+                if (depth == 0) {
+                    /* 4-bit CLUT */
+                    int src_x = (u + dx);
+                    int vx = (tpage_x + (src_x / 4)) & 0x3FF;
+                    uint16_t hw = vram_src[vx];
+                    int shift = (src_x % 4) * 4;
+                    int idx = (hw >> shift) & 0x0F;
+                    if (idx == 0) continue; /* transparent */
+                    pix = palette[idx];
+                } else if (depth == 1) {
+                    /* 8-bit CLUT */
+                    int src_x = (u + dx);
+                    int vx = (tpage_x + (src_x / 2)) & 0x3FF;
+                    uint16_t hw = vram_src[vx];
+                    int shift = (src_x % 2) * 8;
+                    int idx = (hw >> shift) & 0xFF;
+                    if (idx == 0) continue;
+                    pix = palette[idx];
+                } else {
+                    /* 15-bit Direct */
+                    int vx = (tpage_x + u + dx) & 0x3FF;
+                    pix = vram_src[vx];
+                    if ((pix & 0x7FFF) == 0) continue;
+                }
+
+                if (!is_raw_tex) {
+                    uint8_t pr = (uint8_t)(pix & 0x1F);
+                    uint8_t pg = (uint8_t)((pix >> 5) & 0x1F);
+                    uint8_t pb = (uint8_t)((pix >> 10) & 0x1F);
+                    pr = (uint8_t)((pr * scale_r) / 255);
+                    pg = (uint8_t)((pg * scale_g) / 255);
+                    pb = (uint8_t)((pb * scale_b) / 255);
+                    pix = (uint16_t)(((pb) << 10) | ((pg) << 5) | pr | 0x8000u);
+                } else {
+                    pix |= 0x8000u;
+                }
+                vram_dst[px] = pix;
+            }
+        }
+        g_psp_gpu.vram_dirty = 1;
+
         PspVertexTex2D *vert = (PspVertexTex2D *)sceGuGetMemory(2 * sizeof(PspVertexTex2D));
         if (!vert) vert = g_temp_tex_verts;
         vert[0].u = u;     vert[0].v = v;
@@ -1422,6 +1498,7 @@ int DrawSync(int mode) {
         sceGuFinish();
         sceGuSync(0, 0);
         g_psp_gpu.in_frame = 0;
+        g_psp_gpu.frame_drawn = 1;
     }
     if (s_drawsync_callback) {
         s_drawsync_callback();
@@ -1458,6 +1535,13 @@ void psp_write_ppm_screenshot(const char *path, const uint16_t *fb) {
                 }
             } else {
                 uint16_t c = row[x];
+                if (x >= 59 && x < 59 + 362) {
+                    int src_x = ((x - 59) * disp_w) / 362;
+                    uint16_t v_pix = s_dispenv_tex[src_y * 512 + src_x];
+                    if ((v_pix & 0x7FFFu) != 0) c = v_pix;
+                } else {
+                    c = 0;
+                }
                 uint8_t r = (uint8_t)((c & 0x1F) << 3);
                 uint8_t g = (uint8_t)(((c >> 5) & 0x1F) << 3);
                 uint8_t b = (uint8_t)(((c >> 10) & 0x1F) << 3);
@@ -1495,6 +1579,7 @@ int VSync(int mode) {
     int is_carnegie = ((uint32_t)g_SceneDispatchToken == 0xA8000148u);
     static int s_dump_checked = 0;
     static int s_enable_frame_dump = 0;
+    static int s_dumped_notice = 0;
     static int s_dumped_logo = 0;
     static int s_dumped_intro = 0;
     static int s_dumped_title = 0;
@@ -1514,13 +1599,14 @@ int VSync(int mode) {
     }
 
     int is_log_frame = (g_psp_gpu.frame_counter % 60 == 0);
-    int should_dump_logo = (s_enable_frame_dump && g_psp_gpu.frame_counter >= 50 && g_psp_gpu.frame_counter <= 65 && !s_dumped_logo);
-    int should_dump_intro = (s_enable_frame_dump && g_psp_gpu.frame_counter >= 135 && g_psp_gpu.frame_counter <= 165 && !s_dumped_intro);
-    int should_dump_title = (s_enable_frame_dump && g_psp_gpu.frame_counter >= 235 && g_psp_gpu.frame_counter <= 260 && !s_dumped_title);
-    int should_dump_newgame = (s_enable_frame_dump && g_psp_gpu.frame_counter >= 390 && g_psp_gpu.frame_counter <= 415 && !s_dumped_newgame);
-    int should_dump_carnegie = (s_enable_frame_dump && is_carnegie && g_psp_gpu.frame_counter >= 422 && !s_dumped_carnegie);
+    int should_dump_notice = (s_enable_frame_dump && g_psp_gpu.frame_counter >= 15 && g_psp_gpu.frame_counter <= 25 && !s_dumped_notice);
+    int should_dump_logo = (s_enable_frame_dump && g_psp_gpu.frame_counter >= 70 && g_psp_gpu.frame_counter <= 95 && !s_dumped_logo);
+    int should_dump_intro = (s_enable_frame_dump && g_psp_gpu.frame_counter >= 155 && g_psp_gpu.frame_counter <= 185 && !s_dumped_intro);
+    int should_dump_title = (s_enable_frame_dump && g_psp_gpu.frame_counter >= 265 && g_psp_gpu.frame_counter <= 295 && !s_dumped_title);
+    int should_dump_newgame = (s_enable_frame_dump && g_psp_gpu.frame_counter >= 415 && g_psp_gpu.frame_counter <= 440 && !s_dumped_newgame);
+    int should_dump_carnegie = (s_enable_frame_dump && is_carnegie && !s_dumped_carnegie);
 
-    if (is_log_frame || should_dump_logo || should_dump_intro || should_dump_title || should_dump_newgame || should_dump_carnegie) {
+    if (is_log_frame || should_dump_notice || should_dump_logo || should_dump_intro || should_dump_title || should_dump_newgame || should_dump_carnegie) {
         uint32_t vram_nonzero = 0;
         for (int p = 0; p < PS1_VRAM_PIXELS; p++) {
             if (g_ps1_vram[p] != 0) vram_nonzero++;
@@ -1570,6 +1656,11 @@ int VSync(int mode) {
             }
         }
 
+        if (should_dump_notice) {
+            s_dumped_notice = 1;
+            psp_write_ppm_screenshot("ms0:/frame_dump_notice.ppm", edram_disp);
+            psp_write_ppm_screenshot("frame_dump_notice.ppm", edram_disp);
+        }
         if (should_dump_logo) {
             s_dumped_logo = 1;
             psp_write_ppm_screenshot("ms0:/frame_dump_logo.ppm", edram_disp);

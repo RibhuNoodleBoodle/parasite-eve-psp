@@ -39,6 +39,9 @@ extern "C" {
 #define PS1_VRAM_PIXELS         (PS1_VRAM_WIDTH * PS1_VRAM_HEIGHT)
 #define PS1_VRAM_BYTES          (PS1_VRAM_PIXELS * 2)
 
+extern uint16_t g_ps1_vram[PS1_VRAM_PIXELS];
+void psp_render_vram_dispenv(void);
+
 #define PS1_NATIVE_WIDTH        320
 #define PS1_NATIVE_HEIGHT       240
 
@@ -189,6 +192,8 @@ typedef struct PspGpuState {
 
     /* Current PS1 display environment state */
     int has_dispenv;
+    int vram_dirty;
+    int dispenv_dirty;
     DISPENV current_dispenv;
 
     /* Profiling & statistics */
@@ -242,6 +247,8 @@ DISPENV *PspGpu_SetDefDispEnv(DISPENV *env, int x, int y, int w, int h);
 /* Direct VRAM Access */
 uint16_t *PspGpu_GetVramPointer(void);
 void PspGpu_InvalidateVramRange(uint32_t x, uint32_t y, uint32_t w, uint32_t h);
+void psp_write_ppm_screenshot(const char *path, const uint16_t *fb);
+uint32_t PspGpu_GetFrameCounter(void);
 
 /* PS1 Psy-Q Standard API Declarations */
 int  DrawSync(int mode);

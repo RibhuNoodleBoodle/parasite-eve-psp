@@ -395,6 +395,7 @@ int MenuCard_PlayVideo(int vid) {
     if (start_lba > 0) {
         fprintf(stderr, "[PE-PSP] MenuCard_PlayVideo(%d) -> streaming movie from LBA %u (%u sectors)\n",
                 vid, (unsigned)start_lba, (unsigned)sector_count);
+        SetDispMask(1);
         PspStr_StreamVideo(start_lba, sector_count, NULL, 320, 240, 0);
 
         /* Restore 24-bit double-buffered DISPENV/DRAWENV expected by MenuCard_RunListScreen */
@@ -409,6 +410,7 @@ int MenuCard_PlayVideo(int vid) {
         SetDefDrawEnv(&g_RenderDrawEnvArray[1], 0, 240, 320, 240);
         g_RenderDrawEnvArray[1].isbg = 1;
         g_RenderDrawEnvArray[1].dtd = 1;
+        SetDispMask(1);
     }
     return 0;
 }
@@ -474,6 +476,15 @@ void Scene_LoadSceneData(void) {
         Asset_LoadTimImage((TimFile *)s_notice_buf);
         fprintf(stderr, "[PE-PSP] Real Startup Notice TIM loaded from PE.IMG at LBA %u into shadow VRAM.\n",
                 g_PeImageBaseLba);
+        /* Authentic presentation: display the Square Electronic Arts LLC notice */
+        DISPENV notice_env;
+        SetDefDispEnv(&notice_env, 320, 256, 320, 224);
+        notice_env.isrgb24 = 0;
+        PutDispEnv(&notice_env);
+        SetDispMask(1);
+        for (int f = 0; f < 30; f++) {
+            VSync(0);
+        }
     }
     /* Read full menu_memcard Title Screen & Squaresoft Logo asset bundle from PE.IMG:
      * Bundle starts at PE.IMG sector 965 + 0xAA64 (sector 986 + 0x264) and spans 128 sectors (~260 KB). */

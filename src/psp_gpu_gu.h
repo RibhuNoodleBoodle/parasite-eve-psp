@@ -192,6 +192,8 @@ typedef struct PspGpuState {
 
     /* Current PS1 display environment state */
     int has_dispenv;
+    int vram_dirty;
+    int dispenv_dirty;
     DISPENV current_dispenv;
 
     /* Profiling & statistics */
