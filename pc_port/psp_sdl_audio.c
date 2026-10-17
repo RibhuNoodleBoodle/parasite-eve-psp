@@ -20,7 +20,7 @@ extern int  PE_Spu_Active(void) __attribute__((weak));
 extern void PE_Spu_Render(int16_t *out, int frames) __attribute__((weak));
 
 #define RING_BUFFER_FRAMES 16384u /* ~370ms latency pool at 44.1 kHz */
-#define CD_BUFFER_FRAMES   8192u
+#define CD_BUFFER_FRAMES   16384u
 
 /* ── 4-Point Gaussian Interpolation Table (psx-spx verbatim, 512 entries) ───── */
 static const int16_t k_gauss[512] = {
@@ -120,13 +120,15 @@ static struct {
     uint32_t     r_pos;
     uint32_t     w_pos;
     uint32_t     queued;
-    /* CD Audio Input Queue */
     int16_t      cd_ring[CD_BUFFER_FRAMES * 2];
     uint32_t     cd_r;
     uint32_t     cd_w;
     uint32_t     cd_count;
     int32_t      cd_vol_l;
     int32_t      cd_vol_r;
+    int16_t      cd_last_l;
+    int16_t      cd_last_r;
+    int32_t      cd_fade_tail;
     /* 24 SPU Voices */
     SPUVoice     voices[PSP_SPU_VOICES];
     int16_t      noise_level;
@@ -220,6 +222,9 @@ void PspAudio_MixVoices(int16_t *out, int frames)
 
             /* 3. 4-point Gaussian interpolation */
             if (v->noise) {
+                static uint32_t s_lfsr = 0xACE1u;
+                s_lfsr = (s_lfsr >> 1) ^ (-(s_lfsr & 1u) & 0xB400u);
+                A.noise_level = (int16_t)s_lfsr;
                 sample = A.noise_level;
             } else {
                 int g_idx = (int)((v->counter >> 4) & 0xFFu);
@@ -266,6 +271,15 @@ void PspAudio_MixVoices(int16_t *out, int frames)
             mix_r += (cdr * A.cd_vol_r) >> 15;
             A.cd_r = (A.cd_r + 1u) % CD_BUFFER_FRAMES;
             A.cd_count--;
+            A.cd_last_l = cdl;
+            A.cd_last_r = cdr;
+            A.cd_fade_tail = 64;
+        } else if (A.cd_fade_tail > 0) {
+            int32_t cdl = ((int32_t)A.cd_last_l * A.cd_fade_tail) / 64;
+            int32_t cdr = ((int32_t)A.cd_last_r * A.cd_fade_tail) / 64;
+            mix_l += (cdl * A.cd_vol_l) >> 15;
+            mix_r += (cdr * A.cd_vol_r) >> 15;
+            A.cd_fade_tail--;
         }
 
         /* 7. Master volume clamp */
@@ -309,8 +323,6 @@ static void psp_audio_callback(void *userdata, Uint8 *stream, int len)
         copied = (int)to_read;
     }
 
-    if (A.lock) SDL_UnlockMutex(A.lock);
-
     /*
      * If the submitted queue underruns or is inactive, directly render
      * remaining samples via pe_spu (if linked) or internal voice synthesizer.
@@ -325,6 +337,8 @@ static void psp_audio_callback(void *userdata, Uint8 *stream, int len)
             PspAudio_MixVoices(rem_ptr, remaining);
         }
     }
+
+    if (A.lock) SDL_UnlockMutex(A.lock);
 }
 
 /* ── Lifecycle & Control ────────────────────────────────────────────────────── */
@@ -453,12 +467,99 @@ void PspAudio_PushCdAudio(const int16_t *stereo, int frames)
     if (A.lock) SDL_UnlockMutex(A.lock);
 }
 
+/* ── CD-XA ADPCM Sector Decoder & Resampler to 44.1 kHz ─────────────────────── */
+static int32_t s_xa_h[2][2]; /* History for left and right channels */
+
+void PspAudio_PushCdAudioSector(const uint8_t *sector_raw)
+{
+    if (!sector_raw) return;
+
+    uint8_t submode = sector_raw[18];
+    if (!(submode & 0x04u)) return; /* Not an audio sector */
+
+    static const int32_t K0[4] = {0, 60, 115, 98};
+    static const int32_t K1[4] = {0, 0, -52, -55};
+
+    uint8_t coding = sector_raw[19];
+    int stereo = (coding & 3) == 1;
+    int bits8  = ((coding >> 4) & 3) == 1;
+    int rate   = ((coding >> 2) & 3) == 1 ? 18900 : 37800;
+    const uint8_t *data = sector_raw + 24;
+
+    static int16_t s_pcm_in[4096];
+    int n = 0;
+    int units = bits8 ? 4 : 8;
+
+    for (int g = 0; g < 18; g++) {
+        const uint8_t *grp = data + g * 128;
+        for (int u = 0; u < units; u++) {
+            uint8_t hdr = grp[4 + u];
+            int shift = hdr & 0x0Fu;
+            int filt = (hdr >> 4) & 0x03u;
+            int ch = stereo ? (u & 1) : 0;
+            int32_t *h_ch = s_xa_h[ch];
+            if (shift > 12) shift = 9;
+
+            for (int j = 0; j < 28; j++) {
+                int32_t s;
+                if (bits8) {
+                    s = (int32_t)(int16_t)(uint16_t)(grp[16 + j * 4 + u] << 8) >> shift;
+                } else {
+                    uint8_t b = grp[16 + j * 4 + u / 2];
+                    int nib = (u & 1) ? (b >> 4) : (b & 0x0F);
+                    if (nib >= 8) nib -= 16;
+                    s = (int32_t)(int16_t)(uint16_t)(nib << 12) >> shift;
+                }
+                s += (h_ch[0] * K0[filt] + h_ch[1] * K1[filt] + 32) >> 6;
+                if (s > 32767) s = 32767;
+                else if (s < -32768) s = -32768;
+                h_ch[1] = h_ch[0];
+                h_ch[0] = s;
+
+                if (stereo) {
+                    s_pcm_in[((u / 2) * 28 + j) * 2 + ch + (g * (units / 2) * 28) * 2] = (int16_t)s;
+                } else {
+                    s_pcm_in[g * units * 28 + u * 28 + j] = (int16_t)s;
+                }
+            }
+        }
+        n += units * 28;
+    }
+
+    int in_frames = stereo ? (n / 2) : n;
+    if (in_frames <= 1) return;
+
+    /* Resample to 44.1 kHz via linear interpolation */
+    uint32_t step = (uint32_t)(((uint64_t)rate << 16) / 44100u);
+    uint32_t phase = 0;
+    static int16_t s_resampled[4096 * 2];
+    int out_frames = 0;
+
+    while ((phase >> 16) < (uint32_t)(in_frames - 1) && out_frames < 4096) {
+        uint32_t idx = phase >> 16;
+        uint32_t frac = phase & 0xFFFFu;
+        int16_t l0 = stereo ? s_pcm_in[idx * 2] : s_pcm_in[idx];
+        int16_t l1 = stereo ? s_pcm_in[(idx + 1) * 2] : s_pcm_in[idx + 1];
+        int16_t r0 = stereo ? s_pcm_in[idx * 2 + 1] : s_pcm_in[idx];
+        int16_t r1 = stereo ? s_pcm_in[(idx + 1) * 2 + 1] : s_pcm_in[idx + 1];
+
+        s_resampled[out_frames * 2]     = (int16_t)(l0 + (((int32_t)(l1 - l0) * (int32_t)frac) >> 16));
+        s_resampled[out_frames * 2 + 1] = (int16_t)(r0 + (((int32_t)(r1 - r0) * (int32_t)frac) >> 16));
+        out_frames++;
+        phase += step;
+    }
+
+    PspAudio_PushCdAudio(s_resampled, out_frames);
+}
+
 void PspAudio_CdAudioStop(void)
 {
     if (A.lock) SDL_LockMutex(A.lock);
     A.cd_count = 0;
     A.cd_r = 0;
     A.cd_w = 0;
+    A.cd_fade_tail = 0;
+    memset(s_xa_h, 0, sizeof(s_xa_h));
     if (A.lock) SDL_UnlockMutex(A.lock);
 }
 

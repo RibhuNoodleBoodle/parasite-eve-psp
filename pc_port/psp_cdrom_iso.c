@@ -1426,7 +1426,7 @@ static void psp_str_pump_sectors(void)
 
         /* Check for XA audio (submode bit 0x04) */
         if (submode & 0x04u) {
-            PspAudio_PushCdAudio((const int16_t *)(sector_raw + 24), 2016 / 4);
+            PspAudio_PushCdAudioSector(sector_raw);
             continue;
         }
 
@@ -1779,6 +1779,7 @@ int PspStr_StreamVideo(uint32_t start_lba, uint32_t sector_count,
     SetDefDispEnv(&env, 0, 0, tex_width, tex_height);
     env.isrgb24 = is_16bit ? 0 : 1;
     PutDispEnv(&env);
+    SetDispMask(1);
 
     PspInput_Poll();
     uint16_t prev_btns = PspInput_GetButtons();
@@ -1805,7 +1806,7 @@ int PspStr_StreamVideo(uint32_t start_lba, uint32_t sector_count,
 
         /* Check for XA Audio sector (submode bit 0x04) */
         if (submode & 0x04u) {
-            PspAudio_PushCdAudio((const int16_t *)(sector_raw + 24), 2016 / 4);
+            PspAudio_PushCdAudioSector(sector_raw);
             continue;
         }
 

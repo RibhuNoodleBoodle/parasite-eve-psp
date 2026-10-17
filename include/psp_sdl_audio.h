@@ -25,6 +25,7 @@ int  PspAudio_QueueFrames(void);
 
 /* CD-XA / STR / CD-DA streaming audio input */
 void PspAudio_PushCdAudio(const int16_t *stereo, int frames);
+void PspAudio_PushCdAudioSector(const uint8_t *sector_raw);
 void PspAudio_CdAudioStop(void);
 
 /*
