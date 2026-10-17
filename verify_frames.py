@@ -17,6 +17,8 @@ import os
 import sys
 
 TARGET_FRAMES = [
+    ("Square EA Notice", "frame_dump_notice.ppm"),
+    ("Squaresoft Logo", "frame_dump_logo.ppm"),
     ("Intro FMV", "frame_dump_intro_fmv.ppm"),
     ("Title Screen", "frame_dump_title.ppm"),
     ("New Game", "frame_dump_newgame.ppm"),
@@ -133,7 +135,7 @@ def main():
 
     print("\n" + "="*60)
     if all_passed:
-        print("[SUCCESS] All 3 frames passed anti-cheat verification!")
+        print(f"[SUCCESS] All {len(TARGET_FRAMES)} frames passed anti-cheat verification!")
         sys.exit(0)
     else:
         print("[FAILURE] One or more frame verifications failed.")

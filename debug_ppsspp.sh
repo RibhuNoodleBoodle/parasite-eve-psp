@@ -113,7 +113,7 @@ if [[ "${PE_AUTOTEST:-0}" == "1" ]]; then
     touch "$ROOT_DIR/dist/PSP/GAME/ParasiteEve/autotest.flag" 2>/dev/null || true
     touch "$MEMSTICK_GAME_DIR/autotest.flag" 2>/dev/null || true
 else
-    for name in frame_dump.ppm frame_dump_logo.ppm frame_dump_intro_fmv.ppm; do
+    for name in frame_dump.ppm frame_dump_notice.ppm frame_dump_logo.ppm frame_dump_intro_fmv.ppm; do
         rm -f "$ROOT_DIR/$name" "$ROOT_DIR/dist/$name" "$ROOT_DIR/dist/PSP/GAME/ParasiteEve/$name" "$PPSSPP_DIR/$name" "$PPSSPP_DIR/.config/ppsspp/$name" "$PPSSPP_DIR/.config/ppsspp/PSP/GAME/ParasiteEve/$name" 2>/dev/null || true
     done
 fi
@@ -128,7 +128,7 @@ rm -f "$ROOT_DIR/dist/PSP/GAME/ParasiteEve/frame_dump_enable.flag" "$MEMSTICK_GA
 rm -f "$ROOT_DIR/dist/PSP/GAME/ParasiteEve/autotest.flag" "$MEMSTICK_GAME_DIR/autotest.flag" 2>/dev/null || true
 
 # Sync frame dumps into .ppsspp/, dist/, and project root
-for ppm_name in "frame_dump.ppm" "frame_dump_logo.ppm" "frame_dump_intro_fmv.ppm" "frame_dump_title.ppm" "frame_dump_newgame.ppm" "frame_dump_carnegie.ppm" "frame_dump_str.ppm"; do
+for ppm_name in "frame_dump.ppm" "frame_dump_notice.ppm" "frame_dump_logo.ppm" "frame_dump_intro_fmv.ppm" "frame_dump_title.ppm" "frame_dump_newgame.ppm" "frame_dump_carnegie.ppm" "frame_dump_str.ppm"; do
     for candidate_ppm in \
         "$PPSSPP_DIR/.config/ppsspp/PSP/GAME/ParasiteEve/$ppm_name" \
         "$PPSSPP_DIR/.config/ppsspp/$ppm_name" \
