@@ -1780,6 +1780,9 @@ int PspStr_StreamVideo(uint32_t start_lba, uint32_t sector_count,
     env.isrgb24 = is_16bit ? 0 : 1;
     PutDispEnv(&env);
 
+    PspInput_Poll();
+    uint16_t prev_btns = PspInput_GetButtons();
+
     while (current_lba < end_lba) {
         if (current_lba < batch_lba_start || current_lba >= batch_lba_start + batch_sectors_loaded) {
             uint32_t to_load = end_lba - current_lba;
@@ -1837,12 +1840,14 @@ int PspStr_StreamVideo(uint32_t start_lba, uint32_t sector_count,
 
                 /* Complete frame assembled */
                 if (chunk_idx + 1u == num_chunks && frame_bytes > 0) {
-                    /* Check for user skip request */
+                    /* Check for user skip request (require rising edge after initial frames) */
                     PspInput_Poll();
                     uint16_t btns = PspInput_GetButtons();
-                    if (btns & (HOST_PAD_START | HOST_PAD_CROSS)) {
+                    uint16_t newly_pressed = (uint16_t)(btns & ~prev_btns);
+                    prev_btns = btns;
+                    if (frames_rendered >= 2 && (newly_pressed & (HOST_PAD_START | HOST_PAD_CROSS))) {
                         fprintf(stderr, "[PSP_STR] Video skip requested by button press (0x%04X) at frame %u\n",
-                                btns, (unsigned)frames_rendered);
+                                newly_pressed, (unsigned)frames_rendered);
                         break;
                     }
 

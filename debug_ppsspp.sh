@@ -39,11 +39,9 @@ echo "Using portable AppImage: $APPIMAGE_BIN"
 
 echo ""
 echo "=== [Step 2] Staging EBOOT.PBP & Disc Images (exFAT-safe, zero symlinks) ==="
-if [[ ! -f "$EBOOT_PATH" ]]; then
-    echo "Building EBOOT.PBP via Makefile.psp..."
-    make -f Makefile.psp
-    cp -f "$ROOT_DIR/EBOOT.PBP" "$EBOOT_PATH"
-fi
+echo "Building EBOOT.PBP via Makefile.psp..."
+make -f Makefile.psp
+cp -f "$ROOT_DIR/EBOOT.PBP" "$EBOOT_PATH"
 
 # Always keep EBOOT.PBP synced in dist/ and portable memstick GAME directory using cp -f (never ln -s)
 if [[ -f "$ROOT_DIR/EBOOT.PBP" ]]; then
@@ -106,13 +104,18 @@ echo ""
 RUN_TIMEOUT="${RUN_TIMEOUT:-40s}"
 echo "=== [Step 3] Running Portable PPSSPP AppImage (${RUN_TIMEOUT} timeout) ==="
 rm -f "$LOG_FILE" "$PPSSPP_DIR/ probe"*.log 2>/dev/null || true
-rm -f "$ROOT_DIR"/frame_dump*.ppm "$ROOT_DIR/dist"/frame_dump*.ppm "$ROOT_DIR/dist/PSP/GAME/ParasiteEve"/frame_dump*.ppm "$PPSSPP_DIR"/frame_dump*.ppm "$PPSSPP_DIR/.config/ppsspp"/frame_dump*.ppm "$PPSSPP_DIR/.config/ppsspp/PSP/GAME/ParasiteEve"/frame_dump*.ppm 2>/dev/null || true
+rm -f "$ROOT_DIR/autotest.flag" "$ROOT_DIR/dist/PSP/GAME/ParasiteEve/autotest.flag" "$MEMSTICK_GAME_DIR/autotest.flag" 2>/dev/null || true
 touch "$ROOT_DIR/dist/PSP/GAME/ParasiteEve/frame_dump_enable.flag" 2>/dev/null || true
 touch "$MEMSTICK_GAME_DIR/frame_dump_enable.flag" 2>/dev/null || true
 
 if [[ "${PE_AUTOTEST:-0}" == "1" ]]; then
+    rm -f "$ROOT_DIR"/frame_dump*.ppm "$ROOT_DIR/dist"/frame_dump*.ppm "$ROOT_DIR/dist/PSP/GAME/ParasiteEve"/frame_dump*.ppm "$PPSSPP_DIR"/frame_dump*.ppm "$PPSSPP_DIR/.config/ppsspp"/frame_dump*.ppm "$PPSSPP_DIR/.config/ppsspp/PSP/GAME/ParasiteEve"/frame_dump*.ppm 2>/dev/null || true
     touch "$ROOT_DIR/dist/PSP/GAME/ParasiteEve/autotest.flag" 2>/dev/null || true
     touch "$MEMSTICK_GAME_DIR/autotest.flag" 2>/dev/null || true
+else
+    for name in frame_dump.ppm frame_dump_logo.ppm frame_dump_intro_fmv.ppm; do
+        rm -f "$ROOT_DIR/$name" "$ROOT_DIR/dist/$name" "$ROOT_DIR/dist/PSP/GAME/ParasiteEve/$name" "$PPSSPP_DIR/$name" "$PPSSPP_DIR/.config/ppsspp/$name" "$PPSSPP_DIR/.config/ppsspp/PSP/GAME/ParasiteEve/$name" 2>/dev/null || true
+    done
 fi
 
 if [[ -x "$APPIMAGE_BIN" ]]; then
@@ -127,16 +130,22 @@ rm -f "$ROOT_DIR/dist/PSP/GAME/ParasiteEve/autotest.flag" "$MEMSTICK_GAME_DIR/au
 # Sync frame dumps into .ppsspp/, dist/, and project root
 for ppm_name in "frame_dump.ppm" "frame_dump_logo.ppm" "frame_dump_intro_fmv.ppm" "frame_dump_title.ppm" "frame_dump_newgame.ppm" "frame_dump_carnegie.ppm" "frame_dump_str.ppm"; do
     for candidate_ppm in \
-        "$ROOT_DIR/$ppm_name" \
-        "$ROOT_DIR/dist/$ppm_name" \
-        "$ROOT_DIR/dist/PSP/GAME/ParasiteEve/$ppm_name" \
-        "$PPSSPP_DIR/$ppm_name" \
+        "$PPSSPP_DIR/.config/ppsspp/PSP/GAME/ParasiteEve/$ppm_name" \
         "$PPSSPP_DIR/.config/ppsspp/$ppm_name" \
-        "$PPSSPP_DIR/.config/ppsspp/PSP/GAME/ParasiteEve/$ppm_name"; do
+        "$PPSSPP_DIR/$ppm_name" \
+        "$ROOT_DIR/dist/PSP/GAME/ParasiteEve/$ppm_name" \
+        "$ROOT_DIR/dist/$ppm_name" \
+        "$ROOT_DIR/$ppm_name"; do
         if [[ -f "$candidate_ppm" ]]; then
-            cp -f "$candidate_ppm" "$PPSSPP_DIR/$ppm_name"
-            cp -f "$candidate_ppm" "$ROOT_DIR/dist/PSP/GAME/ParasiteEve/$ppm_name"
-            cp -f "$candidate_ppm" "$ROOT_DIR/$ppm_name"
+            if [[ "$candidate_ppm" != "$PPSSPP_DIR/$ppm_name" ]]; then
+                cp -f "$candidate_ppm" "$PPSSPP_DIR/$ppm_name"
+            fi
+            if [[ "$candidate_ppm" != "$ROOT_DIR/dist/PSP/GAME/ParasiteEve/$ppm_name" ]]; then
+                cp -f "$candidate_ppm" "$ROOT_DIR/dist/PSP/GAME/ParasiteEve/$ppm_name"
+            fi
+            if [[ "$candidate_ppm" != "$ROOT_DIR/$ppm_name" ]]; then
+                cp -f "$candidate_ppm" "$ROOT_DIR/$ppm_name"
+            fi
             break
         fi
     done

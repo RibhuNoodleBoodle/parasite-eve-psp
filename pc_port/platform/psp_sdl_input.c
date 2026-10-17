@@ -201,6 +201,7 @@ void PspInput_Poll(void)
                 fprintf(stderr, "[PE-AUTOTEST] autotest.flag present: automated diagnostic input injection enabled.\n");
             } else {
                 s_autotest = 0;
+                fprintf(stderr, "[PE-PSP] Auto-input disabled by default (manual controller polling active).\n");
             }
         }
     }
